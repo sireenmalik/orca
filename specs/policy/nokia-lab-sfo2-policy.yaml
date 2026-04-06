@@ -1,0 +1,82 @@
+---
+spec_type: policy
+version: "1.0.0"
+network: "nokia-lab-sfo2"
+created: "2026-03-13"
+author: "sireenmalik@gmail.com"
+---
+
+# Operator Policy Spec
+
+## Autonomous Action Policies
+
+```yaml
+autonomy:
+  mode: "supervised"                # full | supervised | observe
+  # full      — ORCA acts, notifies after
+  # supervised — ORCA proposes, human has 60s to cancel
+  # observe   — ORCA recommends only, never acts
+
+  per_action_override:
+    reroute_lsp: "full"             # ORCA can reroute without approval
+    set_link_metric: "supervised"   # metric changes need 60s window
+    push_config: "supervised"       # config push needs 60s window
+    rollback: "full"                # rollbacks always immediate
+```
+
+## Notification Policies
+
+```yaml
+notifications:
+  ops_email: "sireenmalik@gmail.com"
+  
+  teams_webhook: ""                 # add Teams webhook URL here
+  
+  notify_on:
+    - link_failure
+    - link_recovery
+    - lsp_reroute
+    - utilization_above_80
+    - utilization_above_90
+    - config_push
+    - config_rollback
+    - tac_case_opened
+
+  tac_escalation:
+    vendor: nokia
+    contact: "noc@nokia.com"        # replace with real TAC contact
+    auto_open_on: ["link_failure", "hardware_alarm"]
+    priority_map:
+      utilization_above_90: "P2"
+      link_failure: "P1"
+      hardware_alarm: "P1"
+```
+
+## Link Exclusions
+
+```yaml
+excluded_links: []
+# Example:
+# excluded_links:
+#   - link: "R5-R6"
+#     reason: "Intermittent errors — avoid for primary paths"
+#     added: "2026-03-10"
+#     added_by: "operator"
+#     expires: "2026-03-20"        # null = permanent
+```
+
+## Human Override History
+
+```yaml
+overrides: []
+# Populated automatically when operators cancel ORCA actions
+# Example:
+# overrides:
+#   - timestamp: "2026-03-12T02:15:00Z"
+#     action: reroute_lsp
+#     lsp: "lsp-customer-a"
+#     proposed_path: ["R1","R6","R5","R4"]
+#     reason: "R6 scheduled for maintenance in 2 hours"
+#     operator: "sireenmalik@gmail.com"
+#     learned: true                # ORCA will avoid this path until expiry
+```

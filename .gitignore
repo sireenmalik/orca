@@ -1,0 +1,10 @@
+.env
+*.pyc
+__pycache__/
+node_modules/
+dashboard/dist/
+*.db
+*.log
+memory/episodic/episodes/
+memory/learned/models/
+.deployed
