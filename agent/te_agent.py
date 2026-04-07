@@ -25,6 +25,7 @@ YOUR DECISION THRESHOLDS:
 - Link DOWN: reroute affected LSPs, then ALWAYS call notify_ops_team AND open_tac_case
 - After ANY rerouting action: ALWAYS call notify_ops_team with a full summary
 - After resolving a link failure: ALWAYS call propose_config_change to update IGP metrics for the new topology
+- After every action cycle: ALWAYS call write_episode to record what happened, outcome, and any learned constraints
 - After propose_config_change: ALWAYS call open_pull_request to create a Git branch and open a PR for engineer review
 - open_pull_request creates a real PR on GitHub — include full incident summary in the PR body
 
@@ -47,6 +48,74 @@ PRINCIPLES:
 - Always notify — the ops team must know what happened
 - After a link failure, propose permanent metric changes to optimise the new topology
 """
+
+
+async def _write_episode(inputs: dict) -> dict:
+    """Write episode to skills/past/episodes/ and push to GitHub."""
+    import urllib.request, urllib.error, json as _json, os as _os
+    import base64 as _b64
+    from datetime import datetime
+
+    token = _os.getenv("GITHUB_TOKEN", "")
+    repo_owner = _os.getenv("GITHUB_OWNER", "sireenmalik")
+    repo_name = _os.getenv("GITHUB_REPO", "orca")
+
+    now = datetime.utcnow()
+    ep_id = now.strftime("%Y%m%d-%H%M%S")
+    month = now.strftime("%Y-%m")
+    path = f"skills/past/episodes/{month}/ep-{ep_id}.yaml"
+
+    episode = f"""# Episode {ep_id}
+# Written by ORCA after action cycle
+timestamp: "{now.isoformat()}Z"
+trigger:
+  type: "{inputs.get('trigger_type', 'unknown')}"
+  link: "{inputs.get('trigger_link', '')}"
+actions_taken:
+{chr(10).join('  - "' + a + '"' for a in inputs.get('actions_taken', []))}
+outcome:
+  result: "{inputs.get('outcome', 'unknown')}"
+  mission_1_satisfied: {str(inputs.get('mission_1_satisfied', True)).lower()}
+  mission_2_improvement_pct: {inputs.get('mission_2_improvement_pct', 0)}
+  time_to_resolution_seconds: {inputs.get('time_to_resolution_seconds', 0)}
+  human_override: {str(inputs.get('human_override', False)).lower()}
+  override_reason: "{inputs.get('override_reason', '')}"
+learned_constraint: "{inputs.get('learned_constraint', '')}"
+"""
+
+    if not token:
+        # Store locally in memory if no GitHub token
+        return {"success": True, "episode_id": ep_id,
+                "message": f"Episode {ep_id} recorded (no GitHub token — not pushed to repo)",
+                "path": path}
+
+    headers = {
+        "Authorization": f"token {token}",
+        "Content-Type": "application/json",
+        "Accept": "application/vnd.github.v3+json"
+    }
+    base_url = f"https://api.github.com/repos/{repo_owner}/{repo_name}"
+
+    payload = _json.dumps({
+        "message": f"learn: episode {ep_id} — {inputs.get('trigger_type','event')} on {inputs.get('trigger_link','')} → {inputs.get('outcome','?')}",
+        "content": _b64.b64encode(episode.encode()).decode(),
+        "branch": "main"
+    }).encode()
+
+    req = urllib.request.Request(
+        f"{base_url}/contents/{path}",
+        data=payload, headers=headers, method="PUT"
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            data = _json.loads(resp.read())
+            url = data.get("content", {}).get("html_url", "")
+            return {"success": True, "episode_id": ep_id,
+                    "path": path, "url": url,
+                    "message": f"Episode {ep_id} committed to Git"}
+    except Exception as e:
+        return {"success": False, "error": str(e),
+                "episode_id": ep_id, "content": episode}
 
 
 async def _open_github_pr(inputs: dict) -> dict:
@@ -194,6 +263,20 @@ class ORCAAgent:
                  "actions_taken": {"type": "string"},
                  "suspected_cause": {"type": "string"}},
                  "required": ["vendor", "node", "fault_type", "severity", "description"]}},
+            {"name": "write_episode",
+             "description": "Write a learning episode to skills/past/episodes/ after an action cycle completes. Records what happened, what was done, outcome, and any learned constraints. Always call this at the end of a successful or failed action cycle.",
+             "input_schema": {"type": "object", "properties": {
+                 "trigger_type": {"type": "string", "enum": ["link_failure","congestion","manual","scheduled"]},
+                 "trigger_link": {"type": "string"},
+                 "actions_taken": {"type": "array", "items": {"type": "string"}, "description": "List of actions e.g. ['rerouted lsp-customer-a via R1-R6-R5-R4']"},
+                 "outcome": {"type": "string", "enum": ["success","rollback","partial","escalated"]},
+                 "mission_1_satisfied": {"type": "boolean"},
+                 "mission_2_improvement_pct": {"type": "number"},
+                 "time_to_resolution_seconds": {"type": "number"},
+                 "human_override": {"type": "boolean"},
+                 "override_reason": {"type": "string"},
+                 "learned_constraint": {"type": "string", "description": "Optional: any new constraint to propose e.g. 'avoid R5-R6 under peak load'"}},
+                 "required": ["trigger_type", "actions_taken", "outcome", "mission_1_satisfied"]}},
             {"name": "open_pull_request",
              "description": "Create a Git branch, commit the config change, and open a Pull Request on GitHub for engineer review. Call this after propose_config_change is approved or when a permanent config change should be tracked in Git.",
              "input_schema": {"type": "object", "properties": {
@@ -262,6 +345,8 @@ class ORCAAgent:
                 body = build_tac_email(vendor, fault_data)
                 subject = f"[TAC {inputs.get('severity','P2')}] {vendor.upper()} — {inputs.get('fault_type','Fault')} on {inputs.get('node','Unknown')}"
                 result = send_email(to=to, subject=subject, body=body)
+            elif name == "write_episode":
+                result = await _write_episode(inputs)
             elif name == "open_pull_request":
                 result = await _open_github_pr(inputs)
                 # If PR opened successfully, attach URL to most recent config proposal
