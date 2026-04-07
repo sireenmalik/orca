@@ -1,119 +1,103 @@
 ---
 name: orca-future
 layer: future
+authority: lowest — pre-computed suggestions only, always validated against persistent
 description: >
-  Scenario planning, what-if analysis, and pre-computed response plans.
-  ORCA uses future skills to prepare responses before faults occur,
-  test configs against the digital twin, and plan capacity changes.
-  Updated by scheduled planning cycles and operator-initiated scenarios.
+  Pre-computed response plans and scenario configs.
+  Future skill provides fast answers for anticipated faults.
+  Every plan is validated against persistent rules before use.
+  Stale or invalid plans are discarded — CSPF recomputes fresh.
 ---
 
-# ORCA Future Skills
+# ORCA Future Skills — Guardrail Layer 3
 
-## What Gets Stored
+## Authority Rule
 
-Pre-computed scenarios and response plans:
+Future skills provide SUGGESTIONS only.
+Every suggestion is validated against persistent layer before execution.
+If a pre-computed plan violates any persistent rule — it is DISCARDED.
+ORCA never executes a future plan that hasn't passed persistent validation.
 
-```yaml
-scenario:
-  id: "scenario-r1r4-failure"
-  name: "R1-R4 Link Failure"
-  created: "2026-03-13T00:00:00Z"
-  network: "nokia-lab-sfo2"
-  type: "failure"                    # failure | congestion | maintenance | capacity
-  
-  hypothesis:
-    link_down: "R1-R4"
-    traffic_matrix: "peak_hour"      # baseline | peak_hour | custom
-    
-  pre_computed_response:
-    algorithm: "CSPF"
-    optimal_rerouting:
-      lsp-customer-a:
-        new_path: ["R1","R6","R5","R4"]
-        projected_utilization:
-          R1-R6: 58.0
-          R6-R5: 61.0
-          R5-R4: 54.0
-      lsp-customer-b:
-        new_path: ["R2","R5","R6"]
-        projected_utilization:
-          R2-R5: 52.0
-          R5-R6: 48.0
-    mission_1_satisfied: true
-    projected_max_utilization: 61.0
+```
+Future plan exists?
+    ↓ yes
+Validate against persistent rules (CSPF + Mission 1 check)
+    ↓ passes
+Check past skill — any learned constraints apply?
+    ↓ clear
+Execute plan (fast path — no LLM reasoning needed)
 
-  configs_generated:
-    - device: "R1"
-      vendor: "nokia"
-      config_file: "scenarios/r1r4-failure/R1.conf"
-      validated: true
-    - device: "R2"
-      vendor: "nokia"  
-      config_file: "scenarios/r1r4-failure/R2.conf"
-      validated: true
-
-  twin_test:
-    run_at: "2026-03-12T23:00:00Z"
-    result: "passed"
-    notes: "All links below 65% under peak traffic matrix"
-
-  ready_to_push: true
-  approval_required: true
-  approved_by: null
+Validate against persistent rules
+    ↓ FAILS (topology or traffic changed)
+Discard plan
+    ↓
+CSPF recomputes fresh
+    ↓
+ORCA reasons over new candidates
 ```
 
 ---
 
-## Scenario Types
+## Pre-Computed Scenarios
 
-### Failure Scenarios
-Pre-compute optimal response for every single link failure and common multi-link failures.
-Run weekly against the digital twin to keep plans current.
+Updated nightly at 02:00 UTC. Each scenario:
 
-### Congestion Scenarios  
-Model traffic growth at 10%, 25%, 50% above baseline.
-Identify which links breach Mission 1 first and pre-plan mitigations.
+```yaml
+scenario:
+  id: "r1-r4-failure"
+  computed_at: "2026-04-13T02:00:00Z"
+  valid_until: "2026-04-14T02:00:00Z"   # expires after 24h — recomputed nightly
+  network: "nokia-lab-sfo2"
+  trigger: { link_down: "R1-R4" }
 
-### Maintenance Scenarios
-For every planned maintenance window:
-- Pre-drain config (increment metrics, reroute LSPs)
-- Post-maintenance restore config
-- Rollback config if maintenance fails
+  response:
+    algorithm: CSPF
+    validated_against_persistent: true
+    mission_1_confirmed: true
+    projected_max_utilization: 61.0
 
-### Capacity Planning
-6-month and 12-month traffic projections.
-Identify required new links, new LSPs, metric adjustments.
-Generate target configs for planned capacity additions.
+    actions:
+      - reroute_lsp:
+          lsp: "lsp-customer-a"
+          new_path: ["R1","R6","R5","R4"]
+          projected_util: { R1-R6: 58.0, R6-R5: 61.0, R5-R4: 54.0 }
+      - reroute_lsp:
+          lsp: "lsp-customer-b"
+          new_path: ["R2","R5","R6"]
+          projected_util: { R2-R5: 52.0, R5-R6: 48.0 }
+
+  config_files:
+    - config_mgmt/candidate/nokia-lab-sfo2/R1.conf
+    - config_mgmt/candidate/nokia-lab-sfo2/R2.conf
+```
 
 ---
 
 ## Planning Cycle
 
 ```
-Nightly (02:00 UTC):
-  - Run CSPF for all single-link failure scenarios
-  - Update pre-computed response plans
-  - Validate configs against current topology
-  - Flag any scenarios where no feasible solution exists
+Nightly 02:00 UTC:
+  For every single-link failure scenario:
+    1. Run CSPF with link removed
+    2. Validate against persistent rules
+    3. Check past skill for learned constraints
+    4. Store plan if valid, discard if not
+    5. Flag scenarios with no feasible solution → ops alert
 
-Weekly (Sunday 01:00 UTC):
-  - Full digital twin simulation of all scenarios
-  - Capacity trend analysis
-  - Update 6-month projections
-  - Generate maintenance window configs for upcoming week
+Weekly Sunday 01:00 UTC:
+  Full digital twin simulation
+  Capacity trend analysis
+  Maintenance window config generation
 ```
 
 ---
 
-## Integration with Real-Time Response
+## Expiry and Invalidation
 
-When a fault occurs, ORCA checks future skills first:
-```
-1. Does a pre-computed plan exist for this fault?
-2. Is the plan still valid? (topology unchanged since last run)
-3. If yes → execute pre-computed plan (near-instant response)
-4. If no  → compute fresh via CSPF + reasoning
-```
+Plans expire after 24 hours or are invalidated immediately if:
+- Topology changes (link added/removed)
+- Traffic matrix shifts >20% from baseline
+- A past skill learned constraint applies to the planned path
+- Persistent rule change (requires code review)
 
-This reduces response time from 15-30 seconds to 2-3 seconds for anticipated faults.
+Expired or invalid plans are never used — CSPF always recomputes.
