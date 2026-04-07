@@ -270,6 +270,7 @@ function AgentLogModal({ events, onClose }) {
     agent_status:    { icon: "📡", color: C.accent, label: "Status" },
     agent_thinking:  { icon: "💭", color: C.muted, label: "Thinking" },
     state_update:    { icon: "📊", color: C.muted, label: "State" },
+    git_command:     { icon: "⌥", color: "#7ee787", label: "Git" },
   };
 
   const fmt = (t, d) => {
@@ -278,6 +279,7 @@ function AgentLogModal({ events, onClose }) {
     if (t === "tool_result") return `${d.tool} →\n${JSON.stringify(d.result || {}, null, 2)}`;
     if (t === "agent_status" || t === "agent_thinking") return d.message;
     if (t === "state_update") return `Network updated — ${Object.keys(d.links || {}).length} links, ${(d.alarms || []).length} alarms`;
+    if (t === "git_command") return d.command;
     return JSON.stringify(d, null, 2);
   };
 
@@ -325,15 +327,25 @@ function AgentLogModal({ events, onClose }) {
           const m = meta[e.type] || { icon: "ℹ️", color: C.muted };
           const text = fmt(e.type, e.data || {});
           return (
-            <div key={i} style={{ marginBottom: "8px", padding: "8px 10px", borderRadius: "5px",
-              background: C.panel2, border: `1px solid ${C.border}` }}>
-              <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "4px" }}>
-                <span>{m.icon}</span>
-                <span style={{ color: C.muted, fontSize: "10px" }}>{new Date(e.timestamp).toLocaleTimeString()}</span>
-                <span style={{ color: m.color, fontSize: "10px", textTransform: "uppercase",
-                  fontWeight: "bold", letterSpacing: "0.5px" }}>{e.type.replace(/_/g, " ")}</span>
-              </div>
-              <div style={{ color: m.color, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{text}</div>
+            <div key={i} style={{
+              marginBottom: e.type === "git_command" ? "1px" : "8px",
+              padding: e.type === "git_command" ? "3px 10px 3px 12px" : "8px 10px",
+              borderRadius: e.type === "git_command" ? "3px" : "5px",
+              background: e.type === "git_command" ? "#0d1f0d" : C.panel2,
+              border: e.type === "git_command" ? "none" : `1px solid ${C.border}`,
+              borderLeft: e.type === "git_command" ? "3px solid #3fb950" : undefined,
+            }}>
+              {e.type !== "git_command" && (
+                <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "4px" }}>
+                  <span>{m.icon}</span>
+                  <span style={{ color: C.muted, fontSize: "10px" }}>{new Date(e.timestamp).toLocaleTimeString()}</span>
+                  <span style={{ color: m.color, fontSize: "10px", textTransform: "uppercase",
+                    fontWeight: "bold", letterSpacing: "0.5px" }}>{e.type.replace(/_/g, " ")}</span>
+                </div>
+              )}
+              <div style={{ color: m.color, whiteSpace: "pre-wrap", wordBreak: "break-word",
+                fontFamily: "monospace", fontSize: e.type === "git_command" ? "12px" : "inherit",
+                fontWeight: e.type === "git_command" ? "bold" : "normal" }}>{text}</div>
             </div>
           );
         })}
@@ -651,6 +663,7 @@ function AgentLog({ events, onOpenModal }) {
     agent_status:    { icon: "📡", color: C.accent },
     agent_thinking:  { icon: "💭", color: C.muted },
     state_update:    { icon: "📊", color: C.muted },
+    git_command:     { icon: "⌥", color: "#7ee787" },
   };
   const fmt = (t, d) => {
     if (t === "agent_reasoning") return d.text;
@@ -658,6 +671,7 @@ function AgentLog({ events, onOpenModal }) {
     if (t === "tool_result") return `${d.tool} → ${JSON.stringify(d.result || {}).slice(0, 120)}`;
     if (t === "agent_status" || t === "agent_thinking") return d.message;
     if (t === "state_update") return `Network updated — ${Object.keys(d.links || {}).length} links, ${(d.alarms || []).length} alarms`;
+    if (t === "git_command") return d.command;
     return JSON.stringify(d).slice(0, 100);
   };
   return (
@@ -680,11 +694,23 @@ function AgentLog({ events, onOpenModal }) {
         )}
         {events.map((e, i) => {
           const m = meta[e.type] || { icon: "ℹ️", color: C.muted };
+          const isGit = e.type === "git_command";
           return (
-            <div key={i} style={{ marginBottom: "4px", paddingBottom: "4px", borderBottom: `1px solid ${C.border}` }}>
+            <div key={i} style={{
+              marginBottom: "4px", paddingBottom: "4px",
+              borderBottom: `1px solid ${C.border}`,
+              ...(isGit ? {
+                background: "#0d1f0d",
+                borderLeft: "3px solid #3fb950",
+                paddingLeft: "8px",
+                borderBottom: "none",
+                marginBottom: "1px",
+              } : {})
+            }}>
               <span style={{ color: C.muted, fontSize: "10px" }}>{new Date(e.timestamp).toLocaleTimeString()}</span>
               <span style={{ margin: "0 5px" }}>{m.icon}</span>
-              <span style={{ color: m.color, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{fmt(e.type, e.data)}</span>
+              <span style={{ color: m.color, whiteSpace: "pre-wrap", wordBreak: "break-word",
+                fontWeight: isGit ? "bold" : "normal" }}>{fmt(e.type, e.data)}</span>
             </div>
           );
         })}
