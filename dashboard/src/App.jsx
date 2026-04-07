@@ -280,6 +280,7 @@ function AgentLogModal({ events, onClose }) {
     if (t === "agent_status" || t === "agent_thinking") return d.message;
     if (t === "state_update") return `Network updated — ${Object.keys(d.links || {}).length} links, ${(d.alarms || []).length} alarms`;
     if (t === "git_command") return d.command;
+    if (t === "pr_opened") return `PR #${d.pr_number} opened\n${d.pr_url}`;
     return JSON.stringify(d, null, 2);
   };
 
@@ -664,6 +665,7 @@ function AgentLog({ events, onOpenModal }) {
     agent_thinking:  { icon: "💭", color: C.muted },
     state_update:    { icon: "📊", color: C.muted },
     git_command:     { icon: "⌥", color: "#7ee787" },
+    pr_opened:       { icon: "🔀", color: C.blue },
   };
   const fmt = (t, d) => {
     if (t === "agent_reasoning") return d.text;
@@ -672,6 +674,7 @@ function AgentLog({ events, onOpenModal }) {
     if (t === "agent_status" || t === "agent_thinking") return d.message;
     if (t === "state_update") return `Network updated — ${Object.keys(d.links || {}).length} links, ${(d.alarms || []).length} alarms`;
     if (t === "git_command") return d.command;
+    if (t === "pr_opened") return `PR #${d.pr_number} opened — ${d.pr_url}`;
     return JSON.stringify(d).slice(0, 100);
   };
   return (
@@ -695,6 +698,7 @@ function AgentLog({ events, onOpenModal }) {
         {events.map((e, i) => {
           const m = meta[e.type] || { icon: "ℹ️", color: C.muted };
           const isGit = e.type === "git_command";
+          const isPR = e.type === "pr_opened";
           return (
             <div key={i} style={{
               marginBottom: "4px", paddingBottom: "4px",
@@ -705,12 +709,29 @@ function AgentLog({ events, onOpenModal }) {
                 paddingLeft: "8px",
                 borderBottom: "none",
                 marginBottom: "1px",
+              } : {}),
+              ...(isPR ? {
+                background: C.blue + "11",
+                borderLeft: `3px solid ${C.blue}`,
+                paddingLeft: "8px",
+                borderRadius: "4px",
+                padding: "6px 8px",
               } : {})
             }}>
               <span style={{ color: C.muted, fontSize: "10px" }}>{new Date(e.timestamp).toLocaleTimeString()}</span>
               <span style={{ margin: "0 5px" }}>{m.icon}</span>
-              <span style={{ color: m.color, whiteSpace: "pre-wrap", wordBreak: "break-word",
-                fontWeight: isGit ? "bold" : "normal" }}>{fmt(e.type, e.data)}</span>
+              {isPR && e.data?.pr_url ? (
+                <span style={{ color: m.color }}>
+                  PR #{e.data.pr_number} opened — {" "}
+                  <a href={e.data.pr_url} target="_blank" rel="noreferrer"
+                    style={{ color: C.blue, fontWeight: "bold" }}>
+                    View on GitHub ↗
+                  </a>
+                </span>
+              ) : (
+                <span style={{ color: m.color, whiteSpace: "pre-wrap", wordBreak: "break-word",
+                  fontWeight: isGit ? "bold" : "normal" }}>{fmt(e.type, e.data)}</span>
+              )}
             </div>
           );
         })}
@@ -819,6 +840,14 @@ function ConfigPanel({ onOpenProposal }) {
             </div>
             {p.projected_improvement && (
               <div style={{ color: C.green, fontSize: "10px", marginTop: "2px" }}>📈 {p.projected_improvement}</div>
+            )}
+            {p.pr_url && (
+              <a href={p.pr_url} target="_blank" rel="noreferrer"
+                style={{ color: C.blue, fontSize: "10px", marginTop: "2px", display: "block",
+                textDecoration: "none", fontWeight: "bold" }}
+                onClick={e => e.stopPropagation()}>
+                🔀 PR #{p.pr_number} — View on GitHub ↗
+              </a>
             )}
           </div>
         ))}

@@ -25,6 +25,8 @@ YOUR DECISION THRESHOLDS:
 - Link DOWN: reroute affected LSPs, then ALWAYS call notify_ops_team AND open_tac_case
 - After ANY rerouting action: ALWAYS call notify_ops_team with a full summary
 - After resolving a link failure: ALWAYS call propose_config_change to update IGP metrics for the new topology
+- After propose_config_change: ALWAYS call open_pull_request to create a Git branch and open a PR for engineer review
+- open_pull_request creates a real PR on GitHub — include full incident summary in the PR body
 
 MANDATORY NOTIFICATION RULE — YOU MUST ALWAYS FOLLOW THIS:
 Every analysis cycle that results in any action MUST end with notify_ops_team.
@@ -45,6 +47,95 @@ PRINCIPLES:
 - Always notify — the ops team must know what happened
 - After a link failure, propose permanent metric changes to optimise the new topology
 """
+
+
+async def _open_github_pr(inputs: dict) -> dict:
+    """Create branch, commit config, open PR on GitHub via API."""
+    import urllib.request, urllib.error, json as _json, os as _os
+    from datetime import datetime
+
+    token = _os.getenv("GITHUB_TOKEN", "")
+    repo_owner = _os.getenv("GITHUB_OWNER", "sireenmalik")
+    repo_name = _os.getenv("GITHUB_REPO", "orca")
+
+    if not token:
+        return {"success": False, "error": "GITHUB_TOKEN not set — PR creation skipped",
+                "note": "Set GITHUB_TOKEN in .env to enable automatic PR creation"}
+
+    headers = {
+        "Authorization": f"token {token}",
+        "Content-Type": "application/json",
+        "Accept": "application/vnd.github.v3+json"
+    }
+    base_url = f"https://api.github.com/repos/{repo_owner}/{repo_name}"
+
+    def gh_request(method, path, data=None):
+        url = f"{base_url}{path}"
+        body = _json.dumps(data).encode() if data else None
+        req = urllib.request.Request(url, data=body, headers=headers, method=method)
+        try:
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                return _json.loads(resp.read()), resp.status
+        except urllib.error.HTTPError as e:
+            return _json.loads(e.read()), e.code
+
+    ts = datetime.utcnow().strftime("%Y%m%d-%H%M")
+    device = inputs.get("device", "device").lower()
+    branch = f"cfg/{device}-{ts}"
+
+    # 1. Get main branch SHA
+    ref_data, _ = gh_request("GET", "/git/ref/heads/main")
+    if "object" not in ref_data:
+        return {"success": False, "error": f"Could not get main branch: {ref_data}"}
+    main_sha = ref_data["object"]["sha"]
+
+    # 2. Create new branch
+    branch_data, status = gh_request("POST", "/git/refs", {
+        "ref": f"refs/heads/{branch}",
+        "sha": main_sha
+    })
+    if status not in (200, 201):
+        return {"success": False, "error": f"Branch creation failed ({status}): {branch_data}"}
+
+    # 3. Create/update file on branch
+    config_path = inputs.get("config_path", f"config_mgmt/candidate/nokia-lab-sfo2/{inputs.get('device', 'R1')}.conf")
+    import base64 as _b64
+    content_b64 = _b64.b64encode(inputs["config_content"].encode()).decode()
+
+    # Check if file exists to get SHA for update
+    existing, ex_status = gh_request("GET", f"/contents/{config_path}?ref={branch}")
+    file_payload = {
+        "message": inputs["title"],
+        "content": content_b64,
+        "branch": branch
+    }
+    if ex_status == 200 and "sha" in existing:
+        file_payload["sha"] = existing["sha"]
+
+    file_data, fstatus = gh_request("PUT", f"/contents/{config_path}", file_payload)
+    if fstatus not in (200, 201):
+        return {"success": False, "error": f"File commit failed ({fstatus}): {file_data}"}
+
+    # 4. Open PR
+    pr_data, pr_status = gh_request("POST", "/pulls", {
+        "title": inputs["title"],
+        "body": inputs["body"],
+        "head": branch,
+        "base": "main"
+    })
+    if pr_status not in (200, 201):
+        return {"success": False, "error": f"PR creation failed ({pr_status}): {pr_data}"}
+
+    pr_url = pr_data.get("html_url", "")
+    pr_number = pr_data.get("number", "?")
+
+    return {
+        "success": True,
+        "pr_url": pr_url,
+        "pr_number": pr_number,
+        "branch": branch,
+        "message": f"PR #{pr_number} opened: {pr_url}"
+    }
 
 
 class ORCAAgent:
@@ -103,6 +194,15 @@ class ORCAAgent:
                  "actions_taken": {"type": "string"},
                  "suspected_cause": {"type": "string"}},
                  "required": ["vendor", "node", "fault_type", "severity", "description"]}},
+            {"name": "open_pull_request",
+             "description": "Create a Git branch, commit the config change, and open a Pull Request on GitHub for engineer review. Call this after propose_config_change is approved or when a permanent config change should be tracked in Git.",
+             "input_schema": {"type": "object", "properties": {
+                 "title": {"type": "string", "description": "PR title e.g. 'fix: update R1 IS-IS metrics after R1-R4 failure'"},
+                 "body": {"type": "string", "description": "PR description — incident summary, what changed, why, validation results"},
+                 "device": {"type": "string", "description": "Device name e.g. R1"},
+                 "config_content": {"type": "string", "description": "Full config content to commit to candidate/"},
+                 "config_path": {"type": "string", "description": "File path e.g. config_mgmt/candidate/nokia-lab-sfo2/R1.conf"}},
+                 "required": ["title", "body", "device", "config_content", "config_path"]}},
             {"name": "propose_config_change",
              "description": "Propose a permanent config change (metric adjustment, LSP path update). Shows diff in dashboard for operator approval before pushing to network.",
              "input_schema": {"type": "object", "properties": {
@@ -162,6 +262,22 @@ class ORCAAgent:
                 body = build_tac_email(vendor, fault_data)
                 subject = f"[TAC {inputs.get('severity','P2')}] {vendor.upper()} — {inputs.get('fault_type','Fault')} on {inputs.get('node','Unknown')}"
                 result = send_email(to=to, subject=subject, body=body)
+            elif name == "open_pull_request":
+                result = await _open_github_pr(inputs)
+                # If PR opened successfully, attach URL to most recent config proposal
+                if result.get("success") and result.get("pr_url"):
+                    for p in reversed(_config_proposals):
+                        if p["status"] in ("pending", "saved"):
+                            p["pr_url"] = result["pr_url"]
+                            p["pr_number"] = result["pr_number"]
+                            p["branch"] = result["branch"]
+                            break
+                    # Emit special event for dashboard PR link rendering
+                    await self._emit("pr_opened", {
+                        "pr_url": result["pr_url"],
+                        "pr_number": result["pr_number"],
+                        "branch": result["branch"]
+                    })
             elif name == "propose_config_change":
                 # Store proposal for dashboard display
                 from datetime import datetime
