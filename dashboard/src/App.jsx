@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, useCallback, useMemo, memo } from "react";
 import * as d3 from "d3";
 
 const API = "";
@@ -247,13 +247,42 @@ function FaultPanel({ links, onAction, lastResult }) {
 }
 
 // ── Agent Log Modal ────────────────────────────────────────────────────────────
+const LogEntry = memo(function LogEntry({ event, meta, fmt }) {
+  const m = meta[event.type] || { icon: "ℹ️", color: C.muted };
+  const text = fmt(event.type, event.data || {});
+  return (
+    <div style={{
+      marginBottom: event.type === "git_command" ? "1px" : "8px",
+      padding: event.type === "git_command" ? "3px 10px 3px 12px" : "8px 10px",
+      borderRadius: event.type === "git_command" ? "3px" : "5px",
+      background: event.type === "git_command" ? "#0d1f0d" : C.panel2,
+      border: event.type === "git_command" ? "none" : `1px solid ${C.border}`,
+      borderLeft: event.type === "git_command" ? "3px solid #3fb950" : undefined,
+    }}>
+      {event.type !== "git_command" && (
+        <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "4px" }}>
+          <span>{m.icon}</span>
+          <span style={{ color: C.muted, fontSize: "10px" }}>{new Date(event.timestamp).toLocaleTimeString()}</span>
+          <span style={{ color: m.color, fontSize: "10px", textTransform: "uppercase",
+            fontWeight: "bold", letterSpacing: "0.5px" }}>{event.type.replace(/_/g, " ")}</span>
+        </div>
+      )}
+      <div style={{ color: m.color, whiteSpace: "pre-wrap", wordBreak: "break-word",
+        fontFamily: "monospace", fontSize: event.type === "git_command" ? "12px" : "inherit",
+        fontWeight: event.type === "git_command" ? "bold" : "normal" }}>{text}</div>
+    </div>
+  );
+});
+
 function AgentLogModal({ events, onClose }) {
   const ref = useRef(null);
   const [filter, setFilter] = useState("all");
   const [search, setSearch] = useState("");
   const scrollLocked = useRef(false);
   const prevMeaningfulLen = useRef(0);
+  const [copied, setCopied] = useState(false);
 
+  // Mount: scroll to bottom, attach scroll listener
   useEffect(() => {
     scrollLocked.current = false;
     prevMeaningfulLen.current = 0;
@@ -269,15 +298,17 @@ function AgentLogModal({ events, onClose }) {
     return () => el.removeEventListener('scroll', onScroll);
   }, []);
 
+  // Auto-scroll only when NEW meaningful events arrive AND user hasn't scrolled up
+  const meaningfulLen = useMemo(() => events.filter(e => e.type !== 'state_update').length, [events]);
+
   useLayoutEffect(() => {
-    const meaningful = events.filter(e => e.type !== 'state_update').length;
-    if (meaningful <= prevMeaningfulLen.current) return;
-    prevMeaningfulLen.current = meaningful;
+    if (meaningfulLen <= prevMeaningfulLen.current) return;
+    prevMeaningfulLen.current = meaningfulLen;
     if (scrollLocked.current) return;
     if (ref.current) ref.current.scrollTop = ref.current.scrollHeight;
-  });
+  }, [meaningfulLen]);
 
-  const meta = {
+  const meta = useMemo(() => ({
     agent_reasoning: { icon: "🧠", color: C.blue, label: "Reasoning" },
     tool_call:       { icon: "🔧", color: C.yellow, label: "Tool Call" },
     tool_result:     { icon: "✅", color: C.green, label: "Tool Result" },
@@ -286,9 +317,9 @@ function AgentLogModal({ events, onClose }) {
     agent_thinking:  { icon: "💭", color: C.muted, label: "Thinking" },
     state_update:    { icon: "📊", color: C.muted, label: "State" },
     git_command:     { icon: "⌥", color: "#7ee787", label: "Git" },
-  };
+  }), []);
 
-  const fmt = (t, d) => {
+  const fmt = useCallback((t, d) => {
     if (t === "agent_reasoning") return d.text;
     if (t === "tool_call") return `${d.tool}(\n  ${JSON.stringify(d.inputs, null, 2).slice(1, -1).trim()}\n)`;
     if (t === "tool_result") return `${d.tool} →\n${JSON.stringify(d.result || {}, null, 2)}`;
@@ -297,27 +328,46 @@ function AgentLogModal({ events, onClose }) {
     if (t === "git_command") return d.command;
     if (t === "pr_opened") return `PR #${d.pr_number} opened\n${d.pr_url}`;
     return JSON.stringify(d, null, 2);
-  };
+  }, []);
 
   const types = ["all", ...Object.keys(meta)];
-  const filtered = events.filter(e => {
+  const filtered = useMemo(() => events.filter(e => {
     if (filter !== "all" && e.type !== filter) return false;
     if (search) {
       const text = fmt(e.type, e.data || {}).toLowerCase();
       if (!text.includes(search.toLowerCase())) return false;
     }
     return true;
-  });
+  }), [events, filter, search, fmt]);
 
-  const copyAll = () => {
+  const copyAll = useCallback(() => {
     const text = events.map(e => {
         const time = new Date(e.timestamp).toLocaleTimeString();
         const d = e.data || {};
         const content = d.text || d.message || d.command || JSON.stringify(d);
         return `[${time}] ${e.type.toUpperCase()}\n${content}`;
     }).join('\n\n');
-    navigator.clipboard.writeText(text).then(() => alert('Copied!'));
-  };
+    try {
+      if (navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.writeText(text).then(() => { setCopied(true); setTimeout(() => setCopied(false), 2000); });
+      } else {
+        const ta = document.createElement("textarea");
+        ta.value = text;
+        ta.style.cssText = "position:fixed;opacity:0;left:-9999px";
+        document.body.appendChild(ta);
+        ta.focus(); ta.select();
+        document.execCommand("copy");
+        document.body.removeChild(ta);
+        setCopied(true); setTimeout(() => setCopied(false), 2000);
+      }
+    } catch (err) {
+      const blob = new Blob([text], { type: "text/plain" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url; a.download = "orca-agent-log.txt";
+      a.click(); URL.revokeObjectURL(url);
+    }
+  }, [events]);
 
   return (
     <Modal title={`Agent Reasoning Log — ${events.length} events`} onClose={onClose} width="900px">
@@ -333,9 +383,10 @@ function AgentLogModal({ events, onClose }) {
           {types.map(t => <option key={t} value={t}>{t === "all" ? "All types" : meta[t]?.label || t}</option>)}
         </select>
         <span style={{ color: C.muted, fontSize: "11px" }}>{filtered.length} events</span>
-        <button onClick={copyAll} style={{ marginLeft: "auto", background: "#21262d",
-          border: `1px solid ${C.border}`, color: C.muted, padding: "5px 12px",
-          borderRadius: "5px", cursor: "pointer", fontSize: "12px" }}>📋 Copy All</button>
+        <button onClick={copyAll} style={{ marginLeft: "auto", background: copied ? "#238636" : "#21262d",
+          border: `1px solid ${copied ? "#3fb950" : C.border}`, color: copied ? "#fff" : C.muted, padding: "5px 12px",
+          borderRadius: "5px", cursor: "pointer", fontSize: "12px", transition: "all 0.2s" }}>
+          {copied ? "Copied!" : "📋 Copy All"}</button>
       </div>
       {/* Log entries */}
       <div ref={ref}
@@ -344,32 +395,9 @@ function AgentLogModal({ events, onClose }) {
         {filtered.length === 0 && (
           <div style={{ color: C.muted, textAlign: "center", padding: "40px" }}>No events match filter</div>
         )}
-        {filtered.map((e, i) => {
-          const m = meta[e.type] || { icon: "ℹ️", color: C.muted };
-          const text = fmt(e.type, e.data || {});
-          return (
-            <div key={i} style={{
-              marginBottom: e.type === "git_command" ? "1px" : "8px",
-              padding: e.type === "git_command" ? "3px 10px 3px 12px" : "8px 10px",
-              borderRadius: e.type === "git_command" ? "3px" : "5px",
-              background: e.type === "git_command" ? "#0d1f0d" : C.panel2,
-              border: e.type === "git_command" ? "none" : `1px solid ${C.border}`,
-              borderLeft: e.type === "git_command" ? "3px solid #3fb950" : undefined,
-            }}>
-              {e.type !== "git_command" && (
-                <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "4px" }}>
-                  <span>{m.icon}</span>
-                  <span style={{ color: C.muted, fontSize: "10px" }}>{new Date(e.timestamp).toLocaleTimeString()}</span>
-                  <span style={{ color: m.color, fontSize: "10px", textTransform: "uppercase",
-                    fontWeight: "bold", letterSpacing: "0.5px" }}>{e.type.replace(/_/g, " ")}</span>
-                </div>
-              )}
-              <div style={{ color: m.color, whiteSpace: "pre-wrap", wordBreak: "break-word",
-                fontFamily: "monospace", fontSize: e.type === "git_command" ? "12px" : "inherit",
-                fontWeight: e.type === "git_command" ? "bold" : "normal" }}>{text}</div>
-            </div>
-          );
-        })}
+        {filtered.map((e, i) => (
+          <LogEntry key={`${e.timestamp}-${e.type}-${i}`} event={e} meta={meta} fmt={fmt} />
+        ))}
       </div>
     </Modal>
   );
