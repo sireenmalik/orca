@@ -1,5 +1,10 @@
 # Episode ep-20260408-001
 # Written by ORCA after action cycle
+# ---------------------------------------------------------
+# TWO SIDES OF THE SAME INCIDENT:
+#   Config fix  → github.com/sireenmalik/orca/pull/1
+#   This record → skills/past/episodes/2026-04/ep-20260408-001.yaml
+# ---------------------------------------------------------
 timestamp: "2026-04-08T07:23:14Z"
 network: "nokia-lab-sfo2"
 
@@ -31,21 +36,21 @@ decision:
   algorithm: CSPF
   k_paths_computed: 3
   reasoning_summary: >
-    R1-R4 link down. R1-R2 and R3-R4 spiked above threshold due to traffic
-    overflow. CSPF computed 3 candidate paths for lsp-customer-a. Selected
-    R1->R6->R5->R4 — lowest projected max utilization (61%). Rerouted
-    lsp-customer-b to R2->R5->R6 to reduce load on R2-R3.
+    R1-R4 link down. R1-R2 and R3-R4 spiked above 88% due to traffic overflow.
+    CSPF computed 3 candidate paths for lsp-customer-a. Selected R1->R6->R5->R4
+    — lowest projected peak utilization at 61%. Rerouted lsp-customer-b to
+    R2->R5->R6 to relieve congestion on R2-R3.
   actions_taken:
     - type: reroute_lsp
       lsp: "lsp-customer-a"
       old_path: ["R1","R2","R3","R4"]
       new_path: ["R1","R6","R5","R4"]
-      reason: "primary path traverses failed link region — congestion on R1-R2 at 91%"
+      reason: "primary path in failed link region — R1-R2 at 91%"
     - type: reroute_lsp
       lsp: "lsp-customer-b"
       old_path: ["R2","R3","R4","R5","R6"]
       new_path: ["R2","R5","R6"]
-      reason: "shorter path available — reduces congestion on R2-R3"
+      reason: "shorter path available — reduces load on R2-R3"
 
 outcome:
   result: "success"
@@ -60,26 +65,35 @@ outcome:
     R1-R4: 0.0
     R2-R5: 52.1
   mission_1_satisfied: true
-  mission_1_detail: "all links below 90% after rerouting"
+  mission_1_detail: "all links below 90% — threshold not breached"
   mission_2_improvement_pct: 31.8
-  mission_2_detail: "max utilization reduced from 91.2% to 61.0%"
+  mission_2_detail: "max utilization 91.2% -> 61.0%"
   human_override: false
 
 notifications:
   ops_notified: true
+  ops_email: "sireenmalik@gmail.com"
   tac_case_opened: true
   tac_vendor: "nokia"
   tac_priority: "P1"
+  tac_subject: "[TAC P1] NOKIA — Link Failure on R1/R4"
 
-config_change_proposed:
+config_change:
   proposal_id: "cfg-20260408-001"
-  title: "fix: update R1 IS-IS metrics after R1-R4 link failure"
+  title: "fix: update R1 IS-IS metrics and LSP paths after R1-R4 link failure"
   pr_branch: "cfg/r1-20260408-0723"
+  pr_url: "https://github.com/sireenmalik/orca/pull/1"
+  files_changed:
+    - config_mgmt/candidate/nokia-lab-sfo2/R1.conf
   validation_passed: true
+  changes_summary:
+    - "R1-R2 IS-IS metric: 10 -> 20"
+    - "R1-R6 IS-IS metric: 10 -> 15"
+    - "R1-R4 interface: enabled -> disabled"
+    - "lsp-customer-a hops: R1->R2->R3->R4 -> R1->R6->R5->R4"
 
 learned_constraint: ""
 notes: >
-  R1-R6-R5-R4 path performed well under load. R5-R6 had 38% headroom
-  before rerouting and absorbed the traffic without breaching Mission 1.
-  This path is now the preferred reroute for R1->R4 LSPs when R1-R4 is
-  unavailable.
+  R1-R6-R5-R4 path performed well. R5-R6 had 38% headroom before rerouting
+  and absorbed the traffic at 61% — well within Mission 1 threshold.
+  This path is the preferred reroute for R1->R4 LSPs when R1-R4 is unavailable.
