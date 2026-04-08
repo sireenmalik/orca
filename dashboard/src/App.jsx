@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, useCallback } from "react";
 import * as d3 from "d3";
 
 const API = "";
@@ -246,41 +246,43 @@ function FaultPanel({ links, onAction, lastResult }) {
   );
 }
 
-// module-level scroll lock — survives React re-renders completely
 // ── Agent Log Modal ────────────────────────────────────────────────────────────
 function AgentLogModal({ events, onClose }) {
   const ref = useRef(null);
   const [filter, setFilter] = useState("all");
   const [search, setSearch] = useState("");
+  const scrollLocked = useRef(false);
+  const prevLen = useRef(0);
 
-  const countRef = useRef(0);
-  const lockedRef = useRef(false);
-
-  // Mount once — scroll to bottom, wire scroll listener
+  // Mount once: scroll to bottom, attach scroll listener
   useEffect(() => {
-    lockedRef.current = false;
-    countRef.current = events.length;
+    scrollLocked.current = false;
+    prevLen.current = events.length;
     const el = ref.current;
     if (!el) return;
-    setTimeout(() => { if (ref.current) ref.current.scrollTop = ref.current.scrollHeight; }, 80);
+    setTimeout(() => {
+      if (ref.current && !scrollLocked.current) {
+        ref.current.scrollTop = ref.current.scrollHeight;
+      }
+    }, 100);
     const onScroll = () => {
       if (!ref.current) return;
-      const dist = ref.current.scrollHeight - ref.current.scrollTop - ref.current.clientHeight;
-      lockedRef.current = dist > 80;
+      const { scrollTop, scrollHeight, clientHeight } = ref.current;
+      scrollLocked.current = (scrollHeight - scrollTop - clientHeight) > 100;
     };
     el.addEventListener('scroll', onScroll, { passive: true });
-    return () => { el.removeEventListener('scroll', onScroll); };
-  }, []);
+    return () => el.removeEventListener('scroll', onScroll);
+  }, []); // ONLY on mount — never again
 
-  // Only auto-scroll for meaningful new events — NOT state_update (polls every 15s)
-  const lastMeaningfulCount = useRef(0);
-  const meaningfulCount = events.filter(e => e.type !== 'state_update').length;
-  useEffect(() => {
-    if (meaningfulCount <= lastMeaningfulCount.current) return;
-    lastMeaningfulCount.current = meaningfulCount;
-    if (lockedRef.current) return;
+  // New meaningful events: scroll only if not locked
+  // Runs after render but checks locked flag set by DOM listener
+  useLayoutEffect(() => {
+    const newLen = events.filter(e => e.type !== 'state_update').length;
+    if (newLen <= prevLen.current) return;
+    prevLen.current = newLen;
+    if (scrollLocked.current) return;
     if (ref.current) ref.current.scrollTop = ref.current.scrollHeight;
-  }, [meaningfulCount]);
+  });
 
   const meta = {
     agent_reasoning: { icon: "🧠", color: C.blue, label: "Reasoning" },
