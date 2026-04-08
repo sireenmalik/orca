@@ -1,0 +1,20 @@
+# Episode 20260408-122947
+# Written by ORCA after action cycle
+timestamp: "2026-04-08T12:29:47.436580Z"
+trigger:
+  type: "link_failure"
+  link: "R1-R4"
+actions_taken:
+  - "rerouted lsp-customer-a via R1-R2-R5-R4 path"
+  - "rerouted lsp-customer-b via R2-R1-R6-R5 path"
+  - "opened Nokia TAC case P2 for hardware repair"
+  - "proposed permanent IGP metric changes"
+  - "created Git PR #12 for config tracking"
+outcome:
+  result: "success"
+  mission_1_satisfied: true
+  mission_2_improvement_pct: 2.8
+  time_to_resolution_seconds: 45
+  human_override: false
+  override_reason: ""
+learned_constraint: "After link failures, prioritize rerouting through underutilized paths (R2-R5 at 25%) before using already-loaded backup paths"
