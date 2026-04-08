@@ -22,7 +22,7 @@ YOUR CAPABILITIES:
 YOUR DECISION THRESHOLDS:
 - Utilization > 80%: investigate and prepare rerouting plan
 - Utilization > 90%: reroute immediately, then ALWAYS call notify_ops_team
-- Link DOWN: reroute affected LSPs, then ALWAYS call notify_ops_team AND open_tac_case
+- Link DOWN: reroute affected LSPs, then ALWAYS call notify_ops_team AND open_tac_case with vendor="nokia"
 - After ANY rerouting action: ALWAYS call notify_ops_team with a full summary
 - After resolving a link failure: ALWAYS call propose_config_change to update IGP metrics for the new topology
 - After every action cycle: ALWAYS call write_episode to record what happened, outcome, and any learned constraints
@@ -38,7 +38,15 @@ YOUR REASONING PROCESS:
 ## 1. OBSERVATION — what do you see?
 ## 2. ANALYSIS — what does it mean?
 ## 3. PLAN — list actions including notify_ops_team and propose_config_change as final steps
-## 4. ACTION — execute tools: diagnose → act → verify → notify → propose config
+## 4. ACTION — execute tools in this exact order:
+##    a) get_topology + get_link_utilization + get_lsp_state + get_alarms (observe)
+##    b) reroute_lsp for each affected LSP (act)
+##    c) get_link_utilization again to verify Mission 1 and Mission 2 (verify)
+##    d) notify_ops_team with full summary (notify)
+##    e) open_tac_case vendor="nokia" (escalate)
+##    f) propose_config_change with permanent metric/LSP updates (config)
+##    g) open_pull_request with incident summary (git)
+##    h) write_episode with outcome (learn)
 ## 5. NOTIFICATION — call notify_ops_team (REQUIRED, never skip)
 
 PRINCIPLES:
@@ -214,6 +222,7 @@ class ORCAAgent:
         self.running = False
         self.poll_interval = int(os.getenv("AGENT_POLL_INTERVAL", "15"))
         self._on_event: Optional[Callable] = None
+        self._handled_faults: set = set()  # track faults already handled this session
 
     def on_event(self, callback: Callable):
         self._on_event = callback
@@ -254,7 +263,7 @@ class ORCAAgent:
                  "required": ["subject", "message", "severity"]}},
             {"name": "open_tac_case", "description": "Open vendor TAC support case for hardware faults.",
              "input_schema": {"type": "object", "properties": {
-                 "vendor": {"type": "string", "enum": ["cisco","juniper","nokia"]},
+                 "vendor": {"type": "string", "enum": ["nokia","juniper","cisco"]},
                  "node": {"type": "string"}, "interface": {"type": "string"},
                  "fault_type": {"type": "string"},
                  "severity": {"type": "string", "enum": ["P1","P2","P3","P4"]},
@@ -329,7 +338,7 @@ class ORCAAgent:
                 result = send_email(to=to, subject=subject, body=inputs["message"])
             elif name == "open_tac_case":
                 to = os.getenv("OPS_EMAIL", "sireenmalik@gmail.com")
-                vendor = inputs.get("vendor", "nokia")
+                vendor = inputs.get("vendor", "nokia")  # Nokia by default
                 fault_data = {
                     "node": inputs.get("node","Unknown"),
                     "interface": inputs.get("interface","Unknown"),
@@ -429,9 +438,28 @@ class ORCAAgent:
                      if ldata.get("utilization_pct", 0) > 75 and ldata.get("state") == "up"}
         down_links = {lid: ldata for lid, ldata in state.links.items()
                       if ldata.get("state") == "down"}
-        if not high_util and not state.alarms and not down_links and not context:
+
+        # Only act on actual faults — DOWN links or active alarms
+        # Do NOT act on high utilization alone on a healthy network
+        has_fault = bool(down_links or state.alarms)
+
+        if not has_fault and not context:
+            self._last_fault_signature = None  # reset — ready for next fault
             await self._emit("agent_status", {"status": "monitoring", "message": "Network healthy — no action required."})
             return {"status": "healthy"}
+
+        # Fault signature based ONLY on down links and alarm IDs — not utilization
+        # This prevents re-triggering when utilization shifts after rerouting
+        fault_signature = frozenset(
+            list(down_links.keys()) + [a.get("id", "") for a in state.alarms]
+        )
+        if not context and fault_signature and fault_signature == getattr(self, '_last_fault_signature', None):
+            await self._emit("agent_status", {"status": "monitoring", "message": "Monitoring — fault previously handled, awaiting resolution."})
+            return {"status": "already_handled"}
+
+        # Set signature BEFORE running — prevents re-trigger even if cycle takes time
+        if not context:
+            self._last_fault_signature = fault_signature
 
         state_summary = self._format_state(state, high_util, down_links)
         user_msg = f"{context or 'Analyze the current network state and take appropriate action.'}\n\n{state_summary}"

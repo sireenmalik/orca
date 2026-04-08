@@ -19,7 +19,6 @@ services:
       - GITHUB_REPO=${GITHUB_REPO}
     volumes:
       - ./data:/data
-      - ./dashboard/dist:/opt/orca/dashboard/dist:ro
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]

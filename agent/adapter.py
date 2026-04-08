@@ -125,9 +125,9 @@ class ContainerlabAdapter(NetworkAdapter):
         self._metrics = {lid: 10 for lid in self._links}
         self._start_time = time.time()
         self._base_util = {
-            "R1-R2": 45.0, "R2-R3": 52.0, "R3-R4": 48.0,
-            "R4-R5": 38.0, "R5-R6": 42.0, "R6-R1": 35.0,
-            "R1-R4": 28.0, "R2-R5": 31.0
+            "R1-R2": 35.0, "R2-R3": 40.0, "R3-R4": 38.0,
+            "R4-R5": 28.0, "R5-R6": 32.0, "R6-R1": 25.0,
+            "R1-R4": 22.0, "R2-R5": 24.0
         }
 
     def _dynamic_util(self, link_id: str) -> float:
@@ -196,7 +196,7 @@ class ContainerlabAdapter(NetworkAdapter):
         link.utilization_pct = 0.0
         adjacent = self._find_adjacent_links(link_id)
         for adj_id in adjacent:
-            self._base_util[adj_id] = min(95.0, self._base_util.get(adj_id, 40) + 35)
+            self._base_util[adj_id] = min(88.0, self._base_util.get(adj_id, 40) + 45)
         alarm = Alarm(id=f"alarm-{int(time.time())}", severity="critical",
                       node=f"{link.src_node}/{link.dst_node}",
                       description=f"Link {link_id} DOWN — traffic impact on adjacent links")
@@ -211,9 +211,9 @@ class ContainerlabAdapter(NetworkAdapter):
         link.state = "up"
         link.utilization_pct = 0.0
         baseline = {
-            "R1-R2": 45.0, "R2-R3": 52.0, "R3-R4": 48.0,
-            "R4-R5": 38.0, "R5-R6": 42.0, "R6-R1": 35.0,
-            "R1-R4": 28.0, "R2-R5": 31.0
+            "R1-R2": 35.0, "R2-R3": 40.0, "R3-R4": 38.0,
+            "R4-R5": 28.0, "R5-R6": 32.0, "R6-R1": 25.0,
+            "R1-R4": 22.0, "R2-R5": 24.0
         }
         self._base_util[link_id] = baseline.get(link_id, 40.0)
         adjacent = self._find_adjacent_links(link_id)

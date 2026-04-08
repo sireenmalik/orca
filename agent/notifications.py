@@ -91,13 +91,13 @@ def send_email(to: str, subject: str, body: str, **kwargs) -> dict:
         email_record["sent"] = False
         email_record["message"] = "Ready — click Open in Mail Client"
 
-    # Deduplicate — skip if identical subject sent in last 60 seconds
+    # Deduplicate — skip if identical subject sent in last 10 minutes
     now = time.time()
     for existing in _email_queue:
         if existing["subject"] == email_record["subject"]:
             try:
                 existing_time = __import__('datetime').datetime.fromisoformat(existing["timestamp"]).timestamp()
-                if now - existing_time < 60:
+                if now - existing_time < 600:  # 10 minute window
                     return {"success": True, "email_id": existing["id"],
                             "mailto": existing["mailto"], "message": "Deduplicated — same subject sent recently",
                             "to": to, "subject": subject}

@@ -11,7 +11,7 @@ const C = {
   panel2: "#1c2128",
 };
 
-const utilColor = u => u >= 90 ? C.red : u >= 80 ? C.orange : u >= 60 ? C.yellow : C.green;
+const utilColor = u => u >= 90 ? C.red : u >= 85 ? C.orange : u >= 75 ? C.yellow : C.green;
 
 // ── Draggable Modal ────────────────────────────────────────────────────────────
 function Modal({ title, onClose, children, width = "780px" }) {
@@ -246,21 +246,37 @@ function FaultPanel({ links, onAction, lastResult }) {
   );
 }
 
+// module-level scroll lock — survives React re-renders completely
 // ── Agent Log Modal ────────────────────────────────────────────────────────────
 function AgentLogModal({ events, onClose }) {
   const ref = useRef(null);
   const [filter, setFilter] = useState("all");
   const [search, setSearch] = useState("");
-  const atBottom = useRef(true);
 
-  const handleScroll = () => {
-    if (!ref.current) return;
-    const { scrollTop, scrollHeight, clientHeight } = ref.current;
-    atBottom.current = scrollHeight - scrollTop - clientHeight < 40;
-  };
+  const countRef = useRef(0);
+  const lockedRef = useRef(false);
+
   useEffect(() => {
-    if (atBottom.current && ref.current) ref.current.scrollTop = ref.current.scrollHeight;
-  }, [events]);
+    lockedRef.current = false;
+    countRef.current = events.length;
+    const el = ref.current;
+    if (!el) return;
+    setTimeout(() => { if (ref.current) ref.current.scrollTop = ref.current.scrollHeight; }, 80);
+    const onScroll = () => {
+      if (!ref.current) return;
+      const dist = ref.current.scrollHeight - ref.current.scrollTop - ref.current.clientHeight;
+      lockedRef.current = dist > 80;
+    };
+    el.addEventListener('scroll', onScroll, { passive: true });
+    return () => { el.removeEventListener('scroll', onScroll); };
+  }, []);
+
+  useEffect(() => {
+    if (events.length <= countRef.current) return;
+    countRef.current = events.length;
+    if (lockedRef.current) return;
+    if (ref.current) ref.current.scrollTop = ref.current.scrollHeight;
+  }, [events.length]);
 
   const meta = {
     agent_reasoning: { icon: "🧠", color: C.blue, label: "Reasoning" },
@@ -318,7 +334,7 @@ function AgentLogModal({ events, onClose }) {
           borderRadius: "5px", cursor: "pointer", fontSize: "12px" }}>📋 Copy All</button>
       </div>
       {/* Log entries */}
-      <div ref={ref} onScroll={handleScroll}
+      <div ref={ref}
         style={{ flex: 1, minHeight: 0, overflowY: "scroll", padding: "12px 16px",
         fontFamily: "monospace", fontSize: "12px", lineHeight: "1.6" }}>
         {filtered.length === 0 && (
@@ -647,14 +663,29 @@ function ConfigModal({ proposal, onClose, onAction }) {
 // ── Agent Log Panel (compact, opens modal) ────────────────────────────────────
 function AgentLog({ events, onOpenModal }) {
   const ref = useRef(null);
-  const atBottom = useRef(true);
-  const handleScroll = () => {
-    if (!ref.current) return;
-    const { scrollTop, scrollHeight, clientHeight } = ref.current;
-    atBottom.current = scrollHeight - scrollTop - clientHeight < 40;
-  };
+  const lockedByUser = useRef(false);
+  const prevEventCount = useRef(0);
+
+  // Attach scroll listener once on mount — track if user scrolled up
   useEffect(() => {
-    if (atBottom.current && ref.current) ref.current.scrollTop = ref.current.scrollHeight;
+    const el = ref.current;
+    if (!el) return;
+    const onScroll = () => {
+      const dist = el.scrollHeight - el.scrollTop - el.clientHeight;
+      lockedByUser.current = dist > 80;
+    };
+    el.addEventListener('scroll', onScroll, { passive: true });
+    return () => el.removeEventListener('scroll', onScroll);
+  }, []);
+
+  // Only scroll to bottom when NEW events arrive AND user hasn't scrolled up
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    if (events.length > prevEventCount.current && !lockedByUser.current) {
+      el.scrollTop = el.scrollHeight;
+    }
+    prevEventCount.current = events.length;
   }, [events]);
   const meta = {
     agent_reasoning: { icon: "🧠", color: C.blue },
@@ -687,7 +718,7 @@ function AgentLog({ events, onOpenModal }) {
           ⤢ Expand
         </button>
       )}
-      <div ref={ref} onScroll={handleScroll}
+      <div ref={ref}
         style={{ flex: 1, minHeight: 0, overflowY: "scroll", fontFamily: "monospace",
         fontSize: "12px", lineHeight: "1.6", paddingRight: "4px" }}>
         {events.length === 0 && (
