@@ -1,0 +1,20 @@
+# Episode 20260408-123225
+# Written by ORCA after action cycle
+timestamp: "2026-04-08T12:32:25.284531Z"
+trigger:
+  type: "link_failure"
+  link: "R1-R4"
+actions_taken:
+  - "rerouted lsp-customer-a via R1-R6-R5-R4"
+  - "rerouted lsp-customer-b via R2-R5-R6"
+  - "opened Nokia TAC case P1"
+  - "proposed permanent IGP metric changes"
+  - "created PR #13 for config tracking"
+outcome:
+  result: "success"
+  mission_1_satisfied: true
+  mission_2_improvement_pct: 3.8
+  time_to_resolution_seconds: 300
+  human_override: false
+  override_reason: ""
+learned_constraint: "R1-R2 link becomes congestion point after R1-R4 failure; consider preemptive metric tuning for failure scenarios"
