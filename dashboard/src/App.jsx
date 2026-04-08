@@ -256,6 +256,7 @@ function AgentLogModal({ events, onClose }) {
   const countRef = useRef(0);
   const lockedRef = useRef(false);
 
+  // Mount once — scroll to bottom, wire scroll listener
   useEffect(() => {
     lockedRef.current = false;
     countRef.current = events.length;
@@ -271,12 +272,15 @@ function AgentLogModal({ events, onClose }) {
     return () => { el.removeEventListener('scroll', onScroll); };
   }, []);
 
+  // Only auto-scroll for meaningful new events — NOT state_update (polls every 15s)
+  const lastMeaningfulCount = useRef(0);
+  const meaningfulCount = events.filter(e => e.type !== 'state_update').length;
   useEffect(() => {
-    if (events.length <= countRef.current) return;
-    countRef.current = events.length;
+    if (meaningfulCount <= lastMeaningfulCount.current) return;
+    lastMeaningfulCount.current = meaningfulCount;
     if (lockedRef.current) return;
     if (ref.current) ref.current.scrollTop = ref.current.scrollHeight;
-  }, [events.length]);
+  }, [meaningfulCount]);
 
   const meta = {
     agent_reasoning: { icon: "🧠", color: C.blue, label: "Reasoning" },
