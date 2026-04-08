@@ -142,6 +142,7 @@ class ProposalAction(BaseModel):
 @app.post("/api/config-proposals/{proposal_id}/approve")
 async def approve_proposal(proposal_id: str, body: ProposalAction = ProposalAction()):
     result = update_proposal_status(proposal_id, "approved")
+    agent.reset_fault_signature()
 
     async def stream_approval():
         await asyncio.sleep(0.3)

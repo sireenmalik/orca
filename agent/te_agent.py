@@ -521,6 +521,10 @@ class ORCAAgent:
             await self.analyze()
             await asyncio.sleep(self.poll_interval)
 
+    def reset_fault_signature(self):
+        """Clear cached fault signature so the next poll cycle re-evaluates."""
+        self._last_fault_signature = None
+
     async def stop(self):
         self.running = False
         await self._emit("agent_status", {"status": "stopped", "message": "ORCA offline."})
