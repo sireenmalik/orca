@@ -145,12 +145,10 @@ async def approve_proposal(proposal_id: str, body: ProposalAction = ProposalActi
 
     async def stream_approval():
         await asyncio.sleep(0.3)
-
-        # Stream git commands
         git_cmds = [
             f"git checkout -b cfg/{proposal_id}",
             f"git add config_mgmt/candidate/nokia-lab-sfo2/R1.conf",
-            f"git commit -m \"fix: R1 IS-IS metrics and LSP paths after R1-R4 failure\"",
+            'git commit -m "fix: R1 IS-IS metrics and LSP paths after R1-R4 failure"',
             f"git push origin cfg/{proposal_id}",
         ]
         for cmd in git_cmds:
@@ -158,57 +156,41 @@ async def approve_proposal(proposal_id: str, body: ProposalAction = ProposalActi
                 "type": "git_command", "timestamp": datetime.utcnow().isoformat(),
                 "data": {"command": cmd}
             })
-            await asyncio.sleep(0.6)
-
-        # NETCONF push
+            await asyncio.sleep(0.7)
         await manager.broadcast({
             "type": "agent_status", "timestamp": datetime.utcnow().isoformat(),
             "data": {"status": "config_pushed",
                      "message": f"✅ Config pushed via NETCONF{' — ' + body.comment if body.comment else ''}"}
         })
         await asyncio.sleep(0.4)
-
-        # Open PR via agent tool
         try:
             pr_result = await agent._execute_tool("open_pull_request", {
-                "title": f"fix: update R1 IS-IS metrics and LSP paths after R1-R4 link failure",
-                "body": "## Incident Summary\n\nFault: R1-R4 link DOWN — resolved autonomously by ORCA\n\nResolution: LSPs rerouted, IS-IS metrics updated\n\n## Validation\n- syntax ✅  semantic ✅  mission_1 ✅  mission_2 ✅  digital_twin ✅  policy ✅\n\nProjected improvement: max utilization 91.2% → 61.0%\n\nEpisode: skills/past/episodes/2026-04/ep-20260408-001.yaml",
-                "device": "R1",
-                "config_content": "",
+                "title": "fix: update R1 IS-IS metrics and LSP paths after R1-R4 link failure",
+                "body": "## Incident Summary\n\nFault: R1-R4 link DOWN\n\nResolution: LSPs rerouted, IS-IS metrics updated\n\n## Validation\n- syntax ✅  semantic ✅  mission_1 ✅  mission_2 ✅  digital_twin ✅  policy ✅\n\nProjected improvement: max utilization 91.2% → 61.0%",
+                "device": "R1", "config_content": "",
                 "config_path": "config_mgmt/candidate/nokia-lab-sfo2/R1.conf"
             })
             pr_data = json.loads(pr_result) if isinstance(pr_result, str) else pr_result
             pr_url = pr_data.get("pr_url", "https://github.com/sireenmalik/orca/pull/1")
             pr_number = pr_data.get("pr_number", 1)
-            await manager.broadcast({
-                "type": "pr_opened", "timestamp": datetime.utcnow().isoformat(),
-                "data": {"pr_number": pr_number, "pr_url": pr_url}
-            })
-        except Exception as e:
-            await manager.broadcast({
-                "type": "pr_opened", "timestamp": datetime.utcnow().isoformat(),
-                "data": {"pr_number": 1, "pr_url": "https://github.com/sireenmalik/orca/pull/1"}
-            })
-
+        except Exception:
+            pr_url = "https://github.com/sireenmalik/orca/pull/1"
+            pr_number = 1
+        await manager.broadcast({
+            "type": "pr_opened", "timestamp": datetime.utcnow().isoformat(),
+            "data": {"pr_number": pr_number, "pr_url": pr_url}
+        })
         await asyncio.sleep(0.3)
-
-        # Write episode
         try:
             await agent._execute_tool("write_episode", {
-                "trigger_type": "link_failure",
-                "trigger_link": "R1-R4",
-                "actions_taken": [
-                    "rerouted lsp-customer-a via R1→R6→R5→R4",
-                    "rerouted lsp-customer-b via R2→R5→R6",
-                    "notified ops team",
-                    "opened Nokia TAC P1 case",
-                    "proposed and pushed permanent IGP metric changes"
-                ],
-                "outcome": "success",
-                "mission_1_satisfied": True,
-                "mission_2_improvement_pct": 31.8,
-                "time_to_resolution_seconds": 47,
-                "learned_constraint": "R1→R6→R5→R4 is preferred reroute when R1-R4 is unavailable"
+                "trigger_type": "link_failure", "trigger_link": "R1-R4",
+                "actions_taken": ["rerouted lsp-customer-a via R1-R6-R5-R4",
+                                   "rerouted lsp-customer-b via R2-R5-R6",
+                                   "notified ops team", "opened Nokia TAC P1 case",
+                                   "proposed and pushed permanent IGP metric changes"],
+                "outcome": "success", "mission_1_satisfied": True,
+                "mission_2_improvement_pct": 31.8, "time_to_resolution_seconds": 47,
+                "learned_constraint": "R1-R6-R5-R4 is preferred reroute when R1-R4 is unavailable"
             })
         except Exception:
             pass
