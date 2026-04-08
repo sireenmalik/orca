@@ -252,34 +252,27 @@ function AgentLogModal({ events, onClose }) {
   const [filter, setFilter] = useState("all");
   const [search, setSearch] = useState("");
   const scrollLocked = useRef(false);
-  const prevLen = useRef(0);
+  const prevMeaningfulLen = useRef(0);
 
-  // Mount once: scroll to bottom, attach scroll listener
   useEffect(() => {
     scrollLocked.current = false;
-    prevLen.current = events.length;
+    prevMeaningfulLen.current = 0;
     const el = ref.current;
     if (!el) return;
-    setTimeout(() => {
-      if (ref.current && !scrollLocked.current) {
-        ref.current.scrollTop = ref.current.scrollHeight;
-      }
-    }, 100);
+    setTimeout(() => { if (ref.current) ref.current.scrollTop = ref.current.scrollHeight; }, 100);
     const onScroll = () => {
-      if (!ref.current) return;
-      const { scrollTop, scrollHeight, clientHeight } = ref.current;
-      scrollLocked.current = (scrollHeight - scrollTop - clientHeight) > 100;
+        if (!ref.current) return;
+        const dist = ref.current.scrollHeight - ref.current.scrollTop - ref.current.clientHeight;
+        scrollLocked.current = dist > 100;
     };
     el.addEventListener('scroll', onScroll, { passive: true });
     return () => el.removeEventListener('scroll', onScroll);
-  }, []); // ONLY on mount — never again
+  }, []);
 
-  // New meaningful events: scroll only if not locked
-  // Runs after render but checks locked flag set by DOM listener
   useLayoutEffect(() => {
-    const newLen = events.filter(e => e.type !== 'state_update').length;
-    if (newLen <= prevLen.current) return;
-    prevLen.current = newLen;
+    const meaningful = events.filter(e => e.type !== 'state_update').length;
+    if (meaningful <= prevMeaningfulLen.current) return;
+    prevMeaningfulLen.current = meaningful;
     if (scrollLocked.current) return;
     if (ref.current) ref.current.scrollTop = ref.current.scrollHeight;
   });
@@ -317,20 +310,13 @@ function AgentLogModal({ events, onClose }) {
   });
 
   const copyAll = () => {
-    const text = filtered.map(e => `[${new Date(e.timestamp).toLocaleTimeString()}] ${e.type}\n${fmt(e.type, e.data || {})}`).join("\n\n---\n\n");
-    if (navigator.clipboard && window.isSecureContext) {
-      navigator.clipboard.writeText(text);
-    } else {
-      const ta = document.createElement("textarea");
-      ta.value = text;
-      ta.style.position = "fixed";
-      ta.style.opacity = "0";
-      document.body.appendChild(ta);
-      ta.focus();
-      ta.select();
-      document.execCommand("copy");
-      document.body.removeChild(ta);
-    }
+    const text = events.map(e => {
+        const time = new Date(e.timestamp).toLocaleTimeString();
+        const d = e.data || {};
+        const content = d.text || d.message || d.command || JSON.stringify(d);
+        return `[${time}] ${e.type.toUpperCase()}\n${content}`;
+    }).join('\n\n');
+    navigator.clipboard.writeText(text).then(() => alert('Copied!'));
   };
 
   return (
