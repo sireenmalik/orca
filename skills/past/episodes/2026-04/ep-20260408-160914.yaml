@@ -1,0 +1,20 @@
+# Episode 20260408-160914
+# Written by ORCA after action cycle
+timestamp: "2026-04-08T16:09:14.222720Z"
+trigger:
+  type: "link_failure"
+  link: "R1-R4"
+actions_taken:
+  - "rerouted lsp-customer-a via R1-R6-R5-R4"
+  - "rerouted lsp-customer-b via R2-R5-R6"
+  - "notified ops team"
+  - "opened Nokia TAC P1 case"
+  - "proposed and pushed permanent IGP metric changes"
+outcome:
+  result: "success"
+  mission_1_satisfied: true
+  mission_2_improvement_pct: 31.8
+  time_to_resolution_seconds: 47
+  human_override: false
+  override_reason: ""
+learned_constraint: "R1-R6-R5-R4 is preferred reroute when R1-R4 is unavailable"
