@@ -1,0 +1,20 @@
+# Episode 20260408-082429
+# Written by ORCA after action cycle
+timestamp: "2026-04-08T08:24:29.822494Z"
+trigger:
+  type: "link_failure"
+  link: "R1-R4"
+actions_taken:
+  - "rerouted lsp-customer-a via R1-R2-R5-R4"
+  - "opened P1 TAC case with Cisco"
+  - "notified ops team"
+  - "proposed IGP metric adjustments"
+  - "opened PR for config changes"
+outcome:
+  result: "success"
+  mission_1_satisfied: true
+  mission_2_improvement_pct: 5.0
+  time_to_resolution_seconds: 120
+  human_override: false
+  override_reason: ""
+learned_constraint: "During major link failures, consider multiple reroute options to avoid overloading single backup paths"
