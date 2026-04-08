@@ -1,0 +1,19 @@
+# Episode 20260408-130455
+# Written by ORCA after action cycle
+timestamp: "2026-04-08T13:04:55.513099Z"
+trigger:
+  type: "link_failure"
+  link: "R1-R4"
+actions_taken:
+  - "rerouted lsp-customer-a from R1→R2→R3→R4 to R1→R6→R5→R4"
+  - "opened Nokia TAC case P1 for R1-R4 hardware failure"
+  - "proposed IGP metric changes to optimize post-failure topology"
+  - "created PR #17 for permanent config changes"
+outcome:
+  result: "success"
+  mission_1_satisfied: true
+  mission_2_improvement_pct: -3.9
+  time_to_resolution_seconds: 45
+  human_override: false
+  override_reason: ""
+learned_constraint: "Consider preemptive load balancing when links approach 75% to prevent cascading congestion during failures"
