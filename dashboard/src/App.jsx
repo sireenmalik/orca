@@ -318,7 +318,19 @@ function AgentLogModal({ events, onClose }) {
 
   const copyAll = () => {
     const text = filtered.map(e => `[${new Date(e.timestamp).toLocaleTimeString()}] ${e.type}\n${fmt(e.type, e.data || {})}`).join("\n\n---\n\n");
-    navigator.clipboard.writeText(text);
+    if (navigator.clipboard && window.isSecureContext) {
+      navigator.clipboard.writeText(text);
+    } else {
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      ta.style.position = "fixed";
+      ta.style.opacity = "0";
+      document.body.appendChild(ta);
+      ta.focus();
+      ta.select();
+      document.execCommand("copy");
+      document.body.removeChild(ta);
+    }
   };
 
   return (
