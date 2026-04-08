@@ -1,0 +1,85 @@
+# Episode ep-20260408-001
+# Written by ORCA after action cycle
+timestamp: "2026-04-08T07:23:14Z"
+network: "nokia-lab-sfo2"
+
+trigger:
+  type: "link_failure"
+  link: "R1-R4"
+  state_before: "down"
+  alarm_severity: "critical"
+  affected_lsps:
+    - lsp-customer-a
+    - lsp-customer-b
+
+context:
+  active_alarms: 1
+  congested_links_before:
+    R1-R2: 91.2
+    R3-R4: 88.7
+  all_links_before:
+    R1-R2: 91.2
+    R2-R3: 52.1
+    R3-R4: 88.7
+    R4-R5: 38.4
+    R5-R6: 42.0
+    R6-R1: 35.1
+    R1-R4: 0.0
+    R2-R5: 31.6
+
+decision:
+  algorithm: CSPF
+  k_paths_computed: 3
+  reasoning_summary: >
+    R1-R4 link down. R1-R2 and R3-R4 spiked above threshold due to traffic
+    overflow. CSPF computed 3 candidate paths for lsp-customer-a. Selected
+    R1->R6->R5->R4 — lowest projected max utilization (61%). Rerouted
+    lsp-customer-b to R2->R5->R6 to reduce load on R2-R3.
+  actions_taken:
+    - type: reroute_lsp
+      lsp: "lsp-customer-a"
+      old_path: ["R1","R2","R3","R4"]
+      new_path: ["R1","R6","R5","R4"]
+      reason: "primary path traverses failed link region — congestion on R1-R2 at 91%"
+    - type: reroute_lsp
+      lsp: "lsp-customer-b"
+      old_path: ["R2","R3","R4","R5","R6"]
+      new_path: ["R2","R5","R6"]
+      reason: "shorter path available — reduces congestion on R2-R3"
+
+outcome:
+  result: "success"
+  time_to_resolution_seconds: 47
+  utilization_after:
+    R1-R2: 58.3
+    R2-R3: 41.2
+    R3-R4: 44.1
+    R4-R5: 38.4
+    R5-R6: 61.0
+    R6-R1: 57.8
+    R1-R4: 0.0
+    R2-R5: 52.1
+  mission_1_satisfied: true
+  mission_1_detail: "all links below 90% after rerouting"
+  mission_2_improvement_pct: 31.8
+  mission_2_detail: "max utilization reduced from 91.2% to 61.0%"
+  human_override: false
+
+notifications:
+  ops_notified: true
+  tac_case_opened: true
+  tac_vendor: "nokia"
+  tac_priority: "P1"
+
+config_change_proposed:
+  proposal_id: "cfg-20260408-001"
+  title: "fix: update R1 IS-IS metrics after R1-R4 link failure"
+  pr_branch: "cfg/r1-20260408-0723"
+  validation_passed: true
+
+learned_constraint: ""
+notes: >
+  R1-R6-R5-R4 path performed well under load. R5-R6 had 38% headroom
+  before rerouting and absorbed the traffic without breaching Mission 1.
+  This path is now the preferred reroute for R1->R4 LSPs when R1-R4 is
+  unavailable.
