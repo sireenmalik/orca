@@ -1077,7 +1077,6 @@ export default function App() {
   // Modals rendered at root level
   const Modals = () => (
     <>
-      {logModalOpen && <AgentLogModal events={events} onClose={() => setLogModalOpen(false)} />}
       {emailModal && <EmailModal email={emailModal} onClose={() => setEmailModal(null)} onSend={handleEmailSend} />}
       {configModal && <ConfigModal proposal={configModal} onClose={() => setConfigModal(null)} onAction={handleConfigAction} />}
     </>
@@ -1088,6 +1087,7 @@ export default function App() {
       <div style={{ background: C.bg, height: "100vh", color: C.text,
         fontFamily: "Arial, sans-serif", display: "flex", flexDirection: "column", overflow: "hidden" }}>
         <Modals />
+        {logModalOpen && <AgentLogModal events={events} onClose={() => setLogModalOpen(false)} />
         <Header />
         <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", padding: "12px", gap: "12px" }}>
           {/* Top row */}
@@ -1131,6 +1131,7 @@ export default function App() {
     <div style={{ background: C.bg, height: "100vh", color: C.text,
       fontFamily: "Arial, sans-serif", display: "flex", flexDirection: "column", overflow: "hidden" }}>
       <Modals />
+      {logModalOpen && <AgentLogModal events={events} onClose={() => setLogModalOpen(false)} />
       <Header mobile />
       <TabBar active={tab} onChange={setTab} configBadge={configBadge} />
       <div style={{ flex: 1, minHeight: 0, overflow: "hidden", padding: "10px" }}>
