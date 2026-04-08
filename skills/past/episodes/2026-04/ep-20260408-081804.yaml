@@ -1,0 +1,19 @@
+# Episode 20260408-081804
+# Written by ORCA after action cycle
+timestamp: "2026-04-08T08:18:04.119382Z"
+trigger:
+  type: "link_failure"
+  link: "R1-R4"
+actions_taken:
+  - "rerouted lsp-customer-a from R1-R2-R3-R4 to R1-R6-R5-R4"
+  - "opened P1 TAC case with Cisco for R1-R4 hardware replacement"
+  - "proposed IGP metric changes: R2-R5 metric 10→8, R3-R4 metric 10→12"
+  - "created PR #5 for permanent config changes"
+outcome:
+  result: "success"
+  mission_1_satisfied: true
+  mission_2_improvement_pct: 3.7
+  time_to_resolution_seconds: 180
+  human_override: false
+  override_reason: ""
+learned_constraint: "Monitor R3-R4 link closely during R1-R4 outages as it becomes critical bottleneck; R2-R5 path is significantly underutilized and good alternate route"
