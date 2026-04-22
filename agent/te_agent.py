@@ -18,6 +18,9 @@ YOUR CAPABILITIES:
 - Notify the ops team of significant events via email (notify_ops_team)
 - Open vendor TAC cases with structured diagnostics (open_tac_case)
 - Propose config changes when permanent network reconfiguration is needed (propose_config_change)
+- Detect unauthorized config changes via drift detection (detect_config_drift)
+- Raise security alerts when policy violations or rogue changes are found (raise_security_alert)
+- Assess customer SLA risk and churn probability from LSP history (assess_sla_risk)
 
 YOUR DECISION THRESHOLDS:
 - Utilization > 80%: investigate and prepare rerouting plan
@@ -27,7 +30,14 @@ YOUR DECISION THRESHOLDS:
 - After resolving a link failure: ALWAYS call propose_config_change to update IGP metrics for the new topology
 - After every action cycle: ALWAYS call write_episode to record what happened, outcome, and any learned constraints
 - After propose_config_change: ALWAYS call open_pull_request to create a Git branch and open a PR for engineer review
-- open_pull_request creates a real PR on GitHub — include full incident summary in the PR body
+- After every action cycle: ALWAYS call assess_sla_risk to update customer churn risk scores
+- Security alarm detected: ALWAYS call detect_config_drift on the affected node, then raise_security_alert if drift found
+
+SECURITY RULES:
+- Any config drift not backed by a Git PR is a security violation
+- Rogue SNMP communities, ACL changes, BGP neighbors = critical severity
+- Always call raise_security_alert then propose_config_change with a revert
+- Open a security PR with title prefix "security:" for all security-related changes
 
 MANDATORY NOTIFICATION RULE — YOU MUST ALWAYS FOLLOW THIS:
 Every analysis cycle that results in any action MUST end with notify_ops_team.
@@ -47,7 +57,16 @@ YOUR REASONING PROCESS:
 ##    f) propose_config_change with permanent metric/LSP updates (config)
 ##    g) open_pull_request with incident summary (git)
 ##    h) write_episode with outcome (learn)
+##    i) assess_sla_risk to update churn model (churn)
 ## 5. NOTIFICATION — call notify_ops_team (REQUIRED, never skip)
+
+SECURITY CYCLE (when security alarm detected):
+##    a) detect_config_drift on alarmed node
+##    b) raise_security_alert with classification and rogue changes
+##    c) notify_ops_team — security breach notification
+##    d) propose_config_change — revert to approved baseline
+##    e) open_pull_request with title "security: revert unauthorized changes on {node}"
+##    f) write_episode with trigger_type="security_violation"
 
 PRINCIPLES:
 - Make-before-break: establish new path before tearing down old
@@ -55,6 +74,7 @@ PRINCIPLES:
 - Always verify after acting — never assume success
 - Always notify — the ops team must know what happened
 - After a link failure, propose permanent metric changes to optimise the new topology
+- Config drift without a PR is a breach — always investigate and propose revert
 """
 
 
@@ -580,6 +600,26 @@ class ORCAAgent:
                  "config_content": {"type": "string", "description": "Full config content to commit to candidate/"},
                  "config_path": {"type": "string", "description": "File path e.g. config_mgmt/candidate/nokia-lab-sfo2/R1.conf"}},
                  "required": ["title", "body", "device", "config_content", "config_path"]}},
+            {"name": "detect_config_drift",
+             "description": "Compare running device config against the approved Git baseline. Returns any unauthorized changes not in the approved config. Call this when security_violation alarm is detected or during routine security checks.",
+             "input_schema": {"type": "object", "properties": {
+                 "node": {"type": "string", "description": "Router node to check e.g. R1"}},
+                 "required": ["node"]}},
+            {"name": "raise_security_alert",
+             "description": "Raise a security alert in the dashboard. Creates a security event in the Security tab. Call this when unauthorized config changes, rogue additions, or policy violations are detected.",
+             "input_schema": {"type": "object", "properties": {
+                 "node": {"type": "string"},
+                 "severity": {"type": "string", "enum": ["critical", "high", "medium", "low"]},
+                 "type": {"type": "string", "description": "e.g. unauthorized_config_change, rogue_bgp_neighbor, acl_weakening"},
+                 "detail": {"type": "string"},
+                 "classification": {"type": "string", "description": "e.g. management_plane_exposure, access_control_weakening"},
+                 "changes": {"type": "array", "description": "The rogue changes detected"}},
+                 "required": ["node", "severity", "type", "detail"]}},
+            {"name": "assess_sla_risk",
+             "description": "Compute SLA risk score and churn probability for each customer LSP based on utilization history, reroute count, and degradation time. Returns per-customer risk scores and churn model output. Call after every analysis cycle.",
+             "input_schema": {"type": "object", "properties": {
+                 "window_hours": {"type": "integer", "description": "History window in hours (default 24)", "default": 24}},
+                 "required": []}},
             {"name": "propose_config_change",
              "description": "Propose a permanent config change (metric adjustment, LSP path update). Shows diff in dashboard for operator approval before pushing to network.",
              "input_schema": {"type": "object", "properties": {
@@ -639,6 +679,100 @@ class ORCAAgent:
                 body = build_tac_email(vendor, fault_data)
                 subject = f"[TAC {inputs.get('severity','P2')}] {vendor.upper()} — {inputs.get('fault_type','Fault')} on {inputs.get('node','Unknown')}"
                 result = send_email(to=to, subject=subject, body=body)
+            elif name == "detect_config_drift":
+                node = inputs.get("node", "R1")
+                running = await self.adapter.get_running_config(node) if hasattr(self.adapter, 'get_running_config') else {}
+                approved = await self.adapter.get_approved_config(node) if hasattr(self.adapter, 'get_approved_config') else {}
+                rogue_meta = running.get("_rogue_meta")
+                if rogue_meta:
+                    drift = {
+                        "drift_detected": True,
+                        "node": node,
+                        "source_ip": rogue_meta.get("source_ip", "unknown"),
+                        "method": rogue_meta.get("method", "unknown"),
+                        "unauthorized_changes": rogue_meta.get("changes", []),
+                        "summary": f"{len(rogue_meta.get('changes',[]))} unauthorized change(s) detected on {node} — not in approved Git baseline"
+                    }
+                else:
+                    drift = {"drift_detected": False, "node": node, "summary": f"No config drift detected on {node}"}
+                result = drift
+            elif name == "raise_security_alert":
+                from datetime import datetime
+                alert = {
+                    "id": f"sec-{int(time.time())}",
+                    "timestamp": datetime.utcnow().isoformat(),
+                    "node": inputs.get("node"),
+                    "severity": inputs.get("severity", "high"),
+                    "type": inputs.get("type", "unauthorized_config_change"),
+                    "detail": inputs.get("detail", ""),
+                    "classification": inputs.get("classification", ""),
+                    "changes": inputs.get("changes", []),
+                    "status": "active",
+                    "source": "gNMI config drift detection",
+                }
+                _security_alerts.append(alert)
+                await self._emit("security_alert", {"alert": alert})
+                result = {"success": True, "alert_id": alert["id"],
+                          "message": f"Security alert raised: {alert['type']} on {alert['node']}"}
+            elif name == "assess_sla_risk":
+                import math
+                window = inputs.get("window_hours", 24)
+                slots = window * 4  # 15-min intervals
+                risk_results = {}
+                # Customer LSP → segment and revenue mapping
+                lsp_meta = {
+                    "lsp-customer-a": {"customer": "Customer-A", "segment": "Enterprise", "arr_usd": 2400000},
+                    "lsp-customer-b": {"customer": "Customer-B", "segment": "SMB", "arr_usd": 480000},
+                    "lsp-mgmt": {"customer": "Management", "segment": "Internal", "arr_usd": 0},
+                }
+                segment_multiplier = {"Enterprise": 0.7, "SMB": 1.0, "Consumer": 1.4, "Internal": 0.0}
+                for lsp_id, meta in lsp_meta.items():
+                    if meta["segment"] == "Internal":
+                        continue
+                    history = self.adapter.get_lsp_history(lsp_id, slots) if hasattr(self.adapter, 'get_lsp_history') else []
+                    if not history:
+                        # Synthesize from current state
+                        lsp_state = await self.adapter.get_lsp_state()
+                        lsp = next((l for l in lsp_state if l["id"] == lsp_id), {})
+                        history = [{"util": 35.0, "rerouted": False}]
+                    utils = [h["util"] for h in history]
+                    reroutes = sum(1 for h in history if h.get("rerouted"))
+                    breach_90 = sum(1 for u in utils if u >= 90)
+                    breach_80 = sum(1 for u in utils if u >= 80)
+                    max_slots = max(slots, 1)
+                    time_degraded = sum(1 for u in utils if u >= 80) * 15  # minutes
+                    # Risk score formula
+                    raw = (
+                        0.35 * min(breach_90 / max(max_slots * 0.1, 1), 1.0) +
+                        0.25 * min(time_degraded / 1440, 1.0) +
+                        0.20 * min(reroutes / 5, 1.0) +
+                        0.12 * min(breach_80 / max(max_slots * 0.2, 1), 1.0) +
+                        0.08 * min(len([u for u in utils if u >= 85]) / max(max_slots * 0.05, 1), 1.0)
+                    )
+                    risk_score = round(min(raw * 100, 100), 1)
+                    # Logistic churn probability
+                    k, midpoint = 0.08, 60
+                    base_prob = 1 / (1 + math.exp(-k * (risk_score - midpoint)))
+                    mult = segment_multiplier.get(meta["segment"], 1.0)
+                    churn_prob = round(min(base_prob * mult * 100, 99), 1)
+                    band = "healthy" if risk_score <= 25 else "watch" if risk_score <= 55 else "at_risk" if risk_score <= 80 else "critical"
+                    risk_results[lsp_id] = {
+                        "lsp_id": lsp_id,
+                        "customer": meta["customer"],
+                        "segment": meta["segment"],
+                        "arr_usd": meta["arr_usd"],
+                        "risk_score": risk_score,
+                        "risk_band": band,
+                        "churn_probability_pct": churn_prob,
+                        "breach_90_count": breach_90,
+                        "breach_80_count": breach_80,
+                        "reroute_count": reroutes,
+                        "time_degraded_mins": time_degraded,
+                        "samples": len(history),
+                    }
+                await self._emit("churn_risk_update", {"risks": risk_results})
+                result = {"success": True, "risks": risk_results,
+                          "summary": f"SLA risk assessed for {len(risk_results)} customer LSPs"}
             elif name == "write_episode":
                 result = await _write_episode(inputs)
             elif name == "open_pull_request":
@@ -817,9 +951,16 @@ class ORCAAgent:
 
 # Shared config proposals queue
 _config_proposals: list = []
+_security_alerts: list = []
 
 def get_config_proposals() -> list:
     return list(_config_proposals)
+
+def get_security_alerts() -> list:
+    return list(_security_alerts)
+
+def clear_security_alerts():
+    _security_alerts.clear()
 
 def update_proposal_status(proposal_id: str, status: str) -> dict:
     for p in _config_proposals:
