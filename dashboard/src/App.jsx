@@ -544,11 +544,11 @@ function OperationsTab({ state, events, agentRunning, wsStatus, onToggleAgent, o
 
           {/* Alarms + Emails */}
           <div style={{ width: "45%", display: "flex", flexDirection: "column", gap: 12, minHeight: 0 }}>
-            <Panel title="Alarms" badge={alarms.filter(a => a.severity === "critical").length} style={{ flex: 1 }}>
+            <Panel title="Alarms" badge={alarms.filter(a => a.severity === "critical").length} style={{ flexShrink: 0, height: 160 }}>
               {alarms.length === 0 ? (
                 <div style={{ fontSize: 11, color: C.muted, textAlign: "center", paddingTop: 8 }}>No active alarms</div>
-              ) : alarms.slice(-10).map((a, i) => (
-                <div key={i} style={{ padding: "5px 0", borderBottom: i < alarms.length - 1 ? `1px solid ${C.border}` : "none", display: "flex", gap: 6, alignItems: "start" }}>
+              ) : alarms.slice(-5).map((a, i) => (
+                <div key={i} style={{ padding: "4px 0", borderBottom: i < alarms.length - 1 ? `1px solid ${C.border}` : "none", display: "flex", gap: 6, alignItems: "start" }}>
                   <span style={{ fontSize: 9, fontWeight: 700, padding: "1px 5px", borderRadius: 3, background: (sevColor[a.severity] || C.yellow) + "18", color: sevColor[a.severity] || C.yellow, fontFamily: "monospace", flexShrink: 0, marginTop: 1 }}>{(a.severity || "warn").slice(0,4).toUpperCase()}</span>
                   <span style={{ fontSize: 11, color: C.text, lineHeight: 1.4 }}>{a.description || a.message}</span>
                 </div>
