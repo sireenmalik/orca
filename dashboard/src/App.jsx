@@ -478,13 +478,17 @@ function OperationsTab({ state, events, agentRunning, wsStatus, onToggleAgent, o
                 {agentRunning ? "⏹ Stop" : "▶ Start"}
               </button>
             </div>
-            <Panel title="Alarms" badge={alarms.filter(a => a.severity === "critical").length} style={{ flex: 1 }}>
-              {alarms.length === 0 ? (
-                <div style={{ fontSize: 11, color: C.muted, textAlign: "center", paddingTop: 8 }}>No active alarms</div>
-              ) : alarms.slice(-5).map((a, i) => (
-                <div key={i} style={{ padding: "5px 0", borderBottom: i < alarms.length - 1 ? `1px solid ${C.border}` : "none", display: "flex", gap: 6, alignItems: "start" }}>
-                  <span style={{ fontSize: 9, fontWeight: 700, padding: "1px 5px", borderRadius: 3, background: (sevColor[a.severity] || C.yellow) + "18", color: sevColor[a.severity] || C.yellow, fontFamily: "monospace", flexShrink: 0, marginTop: 1 }}>{(a.severity || "warn").slice(0,4).toUpperCase()}</span>
-                  <span style={{ fontSize: 11, color: C.text, lineHeight: 1.4 }}>{a.description || a.message}</span>
+            <Panel title="LSPs" style={{ flex: 1 }}>
+              {Object.entries(state.lsps || {}).length === 0 ? (
+                <div style={{ fontSize: 11, color: C.muted, textAlign: "center", paddingTop: 8 }}>No LSP data</div>
+              ) : Object.entries(state.lsps || {}).map(([id, l], i) => (
+                <div key={id} style={{ padding: "5px 0", borderBottom: `1px solid ${C.border}22`, display: "flex", flexDirection: "column", gap: 2 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <span style={{ fontSize: 10, fontWeight: 700, fontFamily: "monospace", color: C.blue }}>{id}</span>
+                    <span style={{ fontSize: 9, padding: "1px 5px", borderRadius: 3, background: l.state === "up" ? C.green + "12" : C.red + "18", color: l.state === "up" ? C.green : C.red, fontFamily: "monospace" }}>{l.state || "up"}</span>
+                  </div>
+                  <div style={{ fontSize: 10, color: C.muted, fontFamily: "monospace" }}>{(l.path || []).join(" → ")}</div>
+                  {l.bandwidth_gbps && <div style={{ fontSize: 9, color: C.muted }}>{l.bandwidth_gbps}Gbps</div>}
                 </div>
               ))}
             </Panel>
@@ -493,8 +497,12 @@ function OperationsTab({ state, events, agentRunning, wsStatus, onToggleAgent, o
         {/* CONTROLS SLIM BAR */}
         <ControlsBar onAnalyze={onAnalyze} onAction={onAction} />
 
-        {/* BOTTOM: Config + Notifications + Emails */}
+        {/* BOTTOM: Util + Config + Alarms/Emails */}
         <div style={{ flex: 1, display: "flex", gap: 12, minHeight: 0 }}>
+          {/* Link Utilization - full height left panel */}
+          <Panel title="Link Utilization" style={{ width: 280, flexShrink: 0 }}>
+            <LinkUtilPanel links={state.links || {}} />
+          </Panel>
           {/* Config Proposals */}
           <Panel title="Config Proposals" badge={pendingProposals} style={{ flex: 1 }}>
             {proposals.length === 0 ? (
@@ -529,10 +537,17 @@ function OperationsTab({ state, events, agentRunning, wsStatus, onToggleAgent, o
             ))}
           </Panel>
 
-          {/* Link Utilization + Emails */}
+          {/* Alarms + Emails */}
           <div style={{ width: "45%", display: "flex", flexDirection: "column", gap: 12, minHeight: 0 }}>
-            <Panel title="Link Utilization" style={{ flex: 1 }}>
-              <LinkUtilPanel links={state.links || {}} />
+            <Panel title="Alarms" badge={alarms.filter(a => a.severity === "critical").length} style={{ flex: 1 }}>
+              {alarms.length === 0 ? (
+                <div style={{ fontSize: 11, color: C.muted, textAlign: "center", paddingTop: 8 }}>No active alarms</div>
+              ) : alarms.slice(-10).map((a, i) => (
+                <div key={i} style={{ padding: "5px 0", borderBottom: i < alarms.length - 1 ? `1px solid ${C.border}` : "none", display: "flex", gap: 6, alignItems: "start" }}>
+                  <span style={{ fontSize: 9, fontWeight: 700, padding: "1px 5px", borderRadius: 3, background: (sevColor[a.severity] || C.yellow) + "18", color: sevColor[a.severity] || C.yellow, fontFamily: "monospace", flexShrink: 0, marginTop: 1 }}>{(a.severity || "warn").slice(0,4).toUpperCase()}</span>
+                  <span style={{ fontSize: 11, color: C.text, lineHeight: 1.4 }}>{a.description || a.message}</span>
+                </div>
+              ))}
             </Panel>
             <Panel title="📧 Email Outbox" badge={emails.length} style={{ flex: 1 }}>
               {emails.length === 0 ? (
