@@ -1,0 +1,20 @@
+# Episode 20260422-030935
+# Written by ORCA after action cycle
+timestamp: "2026-04-22T03:09:35.921773Z"
+trigger:
+  type: "link_failure"
+  link: "R1-R4"
+actions_taken:
+  - "rerouted lsp-customer-a via R1-R6-R5-R4"
+  - "rerouted lsp-customer-b via R2-R5-R6"
+  - "opened Nokia TAC case P1"
+  - "proposed IGP metric optimization"
+  - "created PR #30 for permanent config"
+outcome:
+  result: "success"
+  mission_1_satisfied: true
+  mission_2_improvement_pct: 0.4
+  time_to_resolution_seconds: 45
+  human_override: false
+  override_reason: ""
+learned_constraint: ""
