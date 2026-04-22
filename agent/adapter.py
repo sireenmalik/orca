@@ -113,6 +113,31 @@ class ContainerlabAdapter(NetworkAdapter):
                               ["R1","R6"], 0.5),
     }
 
+    # Approved baseline configs (what should be on each router)
+    APPROVED_CONFIGS = {
+        "R1": {
+            "isis_metrics": {"to-R2": 10, "to-R6": 10, "to-R4": 15},
+            "snmp_communities": ["public-read-only"],
+            "bgp_neighbors": [],
+            "acl_rules": ["permit established", "deny any log"],
+            "logging": "enabled",
+        },
+        "R2": {
+            "isis_metrics": {"to-R1": 10, "to-R3": 10, "to-R5": 15},
+            "snmp_communities": ["public-read-only"],
+            "bgp_neighbors": [],
+            "acl_rules": ["permit established", "deny any log"],
+            "logging": "enabled",
+        },
+        "R3": {
+            "isis_metrics": {"to-R2": 10, "to-R4": 10},
+            "snmp_communities": ["public-read-only"],
+            "bgp_neighbors": [],
+            "acl_rules": ["permit established", "deny any log"],
+            "logging": "enabled",
+        },
+    }
+
     def __init__(self):
         self._nodes = {k: Node(v.id, v.loopback, v.state, v.role)
                        for k, v in self.TOPOLOGY["nodes"].items()}
@@ -129,6 +154,81 @@ class ContainerlabAdapter(NetworkAdapter):
             "R4-R5": 28.0, "R5-R6": 32.0, "R6-R1": 25.0,
             "R1-R4": 22.0, "R2-R5": 24.0
         }
+        # Security: rogue config injection flag
+        self._rogue_config: dict = {}  # node -> list of rogue changes
+        # Churn: LSP utilization history (96 slots = 24h at 15min intervals)
+        self._lsp_history: dict = {lsp_id: [] for lsp_id in self.LSP_DEFAULTS}
+        self._history_tick = 0
+
+    def inject_rogue_config(self, node: str = "R1") -> dict:
+        """Simulate an unauthorized config change pushed directly to a router."""
+        rogue = {
+            "node": node,
+            "changes": [
+                {
+                    "type": "rogue_addition",
+                    "parameter": "snmp-community",
+                    "value": "0p3r4t0r-rw",
+                    "access": "read-write",
+                    "description": "SNMP read-write community string — not in approved config",
+                    "severity": "critical",
+                    "classification": "management_plane_exposure",
+                },
+                {
+                    "type": "rogue_addition",
+                    "parameter": "acl",
+                    "value": "permit ip any any",
+                    "description": "Overly permissive ACL rule appended — bypasses deny-all",
+                    "severity": "critical",
+                    "classification": "access_control_weakening",
+                }
+            ],
+            "injected_at": time.time(),
+            "source_ip": "10.0.3.44",
+            "method": "NETCONF direct push — no ORCA PR",
+        }
+        self._rogue_config[node] = rogue
+        return rogue
+
+    def clear_rogue_config(self) -> None:
+        self._rogue_config.clear()
+
+    async def get_running_config(self, node: str) -> dict:
+        """Return running config for a node — includes any injected rogue changes."""
+        approved = self.APPROVED_CONFIGS.get(node, {})
+        running = {k: list(v) if isinstance(v, list) else dict(v) if isinstance(v, dict) else v
+                   for k, v in approved.items()}
+        rogue = self._rogue_config.get(node)
+        if rogue:
+            for ch in rogue["changes"]:
+                param = ch["parameter"]
+                if param == "snmp-community":
+                    running.setdefault("snmp_communities", []).append(ch["value"])
+                elif param == "acl":
+                    running.setdefault("acl_rules", []).append(ch["value"])
+        running["_has_rogue"] = bool(rogue)
+        running["_rogue_meta"] = rogue
+        return running
+
+    async def get_approved_config(self, node: str) -> dict:
+        """Return the approved baseline config for a node (from Git spec)."""
+        return dict(self.APPROVED_CONFIGS.get(node, {}))
+
+    def record_lsp_utilization(self, lsp_id: str, util_pct: float, rerouted: bool = False):
+        """Add a utilization sample to the LSP history ring buffer."""
+        history = self._lsp_history.setdefault(lsp_id, [])
+        history.append({
+            "ts": time.time(),
+            "util": util_pct,
+            "rerouted": rerouted,
+        })
+        # Keep 96 samples max (~24h at 15min intervals)
+        if len(history) > 96:
+            history.pop(0)
+
+    def get_lsp_history(self, lsp_id: str, window: int = 96) -> list:
+        """Return last N utilization samples for an LSP."""
+        return self._lsp_history.get(lsp_id, [])[-window:]
 
     def _dynamic_util(self, link_id: str) -> float:
         base = self._base_util.get(link_id, 40.0)
@@ -178,6 +278,7 @@ class ContainerlabAdapter(NetworkAdapter):
             return {"error": f"LSP {lsp_id} not found"}
         old_path = list(lsp.path)
         lsp.path = new_path
+        self.record_lsp_utilization(lsp_id, 85.0, rerouted=True)
         return {"success": True, "lsp_id": lsp_id, "old_path": old_path,
                 "new_path": new_path, "message": f"LSP {lsp_id} rerouted"}
 
@@ -234,6 +335,14 @@ class ContainerlabAdapter(NetworkAdapter):
         for lid, u in utils.items():
             if lid in topo["links"]:
                 topo["links"][lid]["utilization_pct"] = u["utilization_pct"]
+        # Record LSP utilization samples for churn model
+        for lsp in lsps:
+            lsp_id = lsp["id"]
+            path = lsp.get("path", [])
+            path_utils = [utils.get(f"{path[i]}-{path[i+1]}", utils.get(f"{path[i+1]}-{path[i]}", {})).get("utilization_pct", 0)
+                         for i in range(len(path)-1)]
+            max_path_util = max(path_utils) if path_utils else 0
+            self.record_lsp_utilization(lsp_id, max_path_util)
         return NetworkState(
             nodes=topo["nodes"], links=topo["links"],
             lsps={l["id"]: l for l in lsps}, alarms=alarms
@@ -258,8 +367,6 @@ class ContainerlabAdapter(NetworkAdapter):
         old = self._base_util[link_id]
         self._base_util[link_id] = utilization
         if utilization > 80:
-            from agent.adapter import Alarm
-            import time
             alarm = Alarm(id=f"alarm-{int(time.time())}", severity="critical" if utilization >= 90 else "major",
                           node=self._links[link_id].src_node,
                           description=f"Link {link_id} utilization at {utilization:.0f}% — threshold exceeded")
