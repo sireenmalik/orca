@@ -450,7 +450,18 @@ function EmailModal({ email, onClose, onSend }) {
 function ControlsBar({ onAnalyze, onAction }) {
   const [link, setLink] = useState("R1-R4");
   const [level, setLevel] = useState(92);
+  const [rogueActive, setRogueActive] = useState(false);
   const links = ["R1-R2","R2-R3","R3-R4","R4-R5","R5-R6","R6-R1","R1-R4","R2-R5"];
+
+  const injectRogue = async () => {
+    await fetch(`${API}/api/demo/inject-rogue-config`, { method: "POST" });
+    setRogueActive(true);
+  };
+  const clearRogue = async () => {
+    await fetch(`${API}/api/demo/clear-rogue-config`, { method: "POST" });
+    setRogueActive(false);
+  };
+
   return (
     <div style={{ background: C.panel, border: `1px solid ${C.border}`, borderRadius: 7, padding: "7px 12px", display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
       <span style={{ fontSize: 9, fontWeight: 700, color: C.muted, letterSpacing: 1, textTransform: "uppercase", flexShrink: 0 }}>Link</span>
@@ -464,6 +475,10 @@ function ControlsBar({ onAnalyze, onAction }) {
       <button onClick={() => onAction("congestion", link, level)} style={{ padding: "4px 9px", borderRadius: 4, fontSize: 10, fontWeight: 600, cursor: "pointer", background: C.orange + "18", border: `1px solid ${C.orange}44`, color: C.orange, flexShrink: 0 }}>Congest</button>
       <button onClick={() => onAction("restore", link)} style={{ padding: "4px 9px", borderRadius: 4, fontSize: 10, fontWeight: 600, cursor: "pointer", background: C.green + "18", border: `1px solid ${C.green}44`, color: C.green, flexShrink: 0 }}>Restore</button>
       <button onClick={() => onAction("reset")} style={{ padding: "4px 9px", borderRadius: 4, fontSize: 10, fontWeight: 600, cursor: "pointer", background: "rgba(255,255,255,0.04)", border: `1px solid ${C.border}`, color: C.muted, flexShrink: 0 }}>Reset</button>
+      <div style={{ width: 1, height: 16, background: C.border, flexShrink: 0 }} />
+      <button onClick={rogueActive ? clearRogue : injectRogue} style={{ padding: "4px 9px", borderRadius: 4, fontSize: 10, fontWeight: 600, cursor: "pointer", background: rogueActive ? C.green + "18" : C.purple + "18", border: `1px solid ${rogueActive ? C.green + "44" : C.purple + "44"}`, color: rogueActive ? C.green : C.purple, flexShrink: 0 }}>
+        {rogueActive ? "🛡 Clear Rogue" : "🔓 Inject Rogue Config"}
+      </button>
       <button onClick={onAnalyze} style={{ padding: "4px 9px", borderRadius: 4, fontSize: 10, fontWeight: 600, cursor: "pointer", background: C.blue + "18", border: `1px solid ${C.blue}44`, color: C.blue, flexShrink: 0, marginLeft: "auto" }}>🔍 Analyze</button>
     </div>
   );
@@ -770,19 +785,56 @@ function ContractStackTab() {
   );
 }
 
-// ─── SECURITY TAB ─────────────────────────────────────────────────────────────
-const securityEvents = [
-  { ts: "14:32", sev: "critical", src: "gNMI", title: "Unauthorized config push attempt", detail: "IP 10.0.3.44 — invalid cert", status: "blocked" },
-  { ts: "14:18", sev: "high", src: "RADIUS", title: "Brute force auth pattern", detail: "847 failed auths from BRAS-02 in 5min", status: "investigating" },
-  { ts: "13:55", sev: "medium", src: "BGP", title: "Anomalous prefix announcement", detail: "AS 64512 advertising 10.0.0.0/8", status: "quarantined" },
-  { ts: "13:41", sev: "low", src: "TLS", title: "Certificate expiry in 14d", detail: "gNMI server cert on PE-01", status: "scheduled" },
-];
+// ─── SECURITY TAB (live) ─────────────────────────────────────────────────────
+function SecurityTab({ events }) {
+  const [alerts, setAlerts] = useState([]);
 
-function SecurityTab() {
+  useEffect(() => {
+    const poll = async () => {
+      try {
+        const r = await fetch(`${API}/api/security-alerts`);
+        const d = await r.json();
+        if (d.alerts && d.alerts.length > 0) setAlerts(d.alerts);
+      } catch {}
+    };
+    poll();
+    const t = setInterval(poll, 5000);
+    return () => clearInterval(t);
+  }, []);
+
+  // Also pick up security_alert events from WebSocket
+  useEffect(() => {
+    const sec = events.filter(e => e.type === "security_alert").map(e => e.data?.alert).filter(Boolean);
+    if (sec.length > 0) setAlerts(prev => {
+      const ids = new Set(prev.map(a => a.id));
+      return [...prev, ...sec.filter(a => !ids.has(a.id))];
+    });
+  }, [events]);
+
+  // Merge live alerts with mock baseline for demo richness
+  const mockBase = [
+    { ts: "14:18", sev: "high", src: "RADIUS", title: "Brute force auth pattern", detail: "847 failed auths from BRAS-02 in 5min", status: "investigating" },
+    { ts: "13:55", sev: "medium", src: "BGP", title: "Anomalous prefix announcement", detail: "AS 64512 advertising 10.0.0.0/8", status: "quarantined" },
+    { ts: "13:41", sev: "low", src: "TLS", title: "Certificate expiry in 14d", detail: "gNMI server cert on PE-01", status: "scheduled" },
+  ];
+
+  const liveEvents = alerts.map(a => ({
+    ts: a.timestamp ? new Date(a.timestamp).toLocaleTimeString() : "live",
+    sev: a.severity,
+    src: a.source || "gNMI",
+    title: a.type?.replace(/_/g, " ") || "Security alert",
+    detail: a.detail,
+    status: "active",
+    live: true,
+  }));
+
+  const allEvents = [...liveEvents, ...mockBase];
+  const counts = { critical: allEvents.filter(e => e.sev === "critical").length, high: allEvents.filter(e => e.sev === "high").length, medium: allEvents.filter(e => e.sev === "medium").length, low: allEvents.filter(e => e.sev === "low").length };
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 12, height: "100%", overflow: "auto" }}>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10 }}>
-        {[["CRITICAL", 1, "#ef4444"], ["HIGH", 2, "#f97316"], ["MEDIUM", 1, "#eab308"], ["LOW", 1, "#06b6d4"]].map(([l, n, c]) => (
+        {[["CRITICAL", counts.critical, "#ef4444"], ["HIGH", counts.high, "#f97316"], ["MEDIUM", counts.medium, "#eab308"], ["LOW", counts.low, "#06b6d4"]].map(([l, n, c]) => (
           <div key={l} style={{ background: C.panel, border: `1px solid ${C.border}`, borderRadius: 8, padding: "12px 14px", borderTop: `2px solid ${c}` }}>
             <div style={{ fontSize: 9, letterSpacing: 1, color: C.muted, marginBottom: 4 }}>{l}</div>
             <div style={{ fontSize: 24, fontWeight: 700, fontFamily: "monospace", color: c }}>{n}</div>
@@ -790,16 +842,17 @@ function SecurityTab() {
         ))}
       </div>
       <Panel title="Security Events" style={{ flex: 1 }}>
-        {securityEvents.map((ev, i) => (
-          <div key={i} style={{ padding: "10px 0", borderBottom: `1px solid ${C.border}`, display: "grid", gridTemplateColumns: "44px 56px 1fr 80px", gap: 10, alignItems: "start" }}>
-            <span style={{ fontSize: 10, fontFamily: "monospace", color: C.muted }}>{ev.ts}</span>
+        {allEvents.map((ev, i) => (
+          <div key={i} style={{ padding: "10px 0", borderBottom: `1px solid ${C.border}`, display: "grid", gridTemplateColumns: "52px 56px 1fr 80px", gap: 10, alignItems: "start" }}>
+            <span style={{ fontSize: 10, fontFamily: "monospace", color: ev.live ? C.red : C.muted }}>{ev.ts}</span>
             <span style={{ fontSize: 9, fontWeight: 700, padding: "2px 6px", borderRadius: 3, textAlign: "center", background: sevColor[ev.sev] + "18", color: sevColor[ev.sev], textTransform: "uppercase", fontFamily: "monospace" }}>{ev.sev}</span>
             <div>
               <span style={{ fontSize: 9, padding: "1px 5px", borderRadius: 3, background: "rgba(255,255,255,0.04)", color: C.muted, marginRight: 6, fontFamily: "monospace" }}>{ev.src}</span>
               <span style={{ fontSize: 12, fontWeight: 600, color: C.text }}>{ev.title}</span>
+              {ev.live && <span style={{ fontSize: 9, padding: "1px 5px", borderRadius: 3, background: C.red + "18", color: C.red, fontFamily: "monospace", marginLeft: 6 }}>LIVE</span>}
               <div style={{ fontSize: 11, color: C.muted, marginTop: 2, lineHeight: 1.3 }}>{ev.detail}</div>
             </div>
-            <span style={{ fontSize: 9, padding: "2px 6px", borderRadius: 3, textAlign: "center", fontFamily: "monospace", background: ev.status === "blocked" ? C.green + "12" : ev.status === "investigating" ? C.yellow + "12" : "rgba(255,255,255,0.04)", color: ev.status === "blocked" ? C.green : ev.status === "investigating" ? C.yellow : C.muted }}>{ev.status}</span>
+            <span style={{ fontSize: 9, padding: "2px 6px", borderRadius: 3, textAlign: "center", fontFamily: "monospace", background: ev.status === "blocked" ? C.green + "12" : ev.status === "active" ? C.red + "12" : ev.status === "investigating" ? C.yellow + "12" : "rgba(255,255,255,0.04)", color: ev.status === "blocked" ? C.green : ev.status === "active" ? C.red : ev.status === "investigating" ? C.yellow : C.muted }}>{ev.status}</span>
           </div>
         ))}
       </Panel>
@@ -811,9 +864,45 @@ function SecurityTab() {
 const churnHistory = [{ m: "Nov", v: 4.1 }, { m: "Dec", v: 3.8 }, { m: "Jan", v: 3.5 }, { m: "Feb", v: 3.9 }, { m: "Mar", v: 3.2 }, { m: "Apr", v: 3.4 }];
 const churnForecast = [{ m: "May", v: 3.2, lo: 2.8, hi: 3.6 }, { m: "Jun", v: 3.5, lo: 2.9, hi: 4.1 }, { m: "Jul", v: 3.1, lo: 2.4, hi: 3.8 }, { m: "Aug", v: 2.8, lo: 2.0, hi: 3.6 }];
 
-function ChurnTab() {
+function ChurnTab({ events }) {
+  const [risks, setRisks] = useState({});
+  const [lastIncident, setLastIncident] = useState(null);
+
+  useEffect(() => {
+    const poll = async () => {
+      try {
+        const r = await fetch(`${API}/api/churn-risk`);
+        const d = await r.json();
+        if (d.risks) setRisks(d.risks);
+      } catch {}
+    };
+    poll();
+    const t = setInterval(poll, 10000);
+    return () => clearInterval(t);
+  }, []);
+
+  // Pick up live churn_risk_update events from WebSocket
+  useEffect(() => {
+    const latest = [...events].reverse().find(e => e.type === "churn_risk_update");
+    if (latest?.data?.risks) setRisks(latest.data.risks);
+  }, [events]);
+
+  // Detect incident resolution to show counterfactual
+  useEffect(() => {
+    const resolved = [...events].reverse().find(e =>
+      e.type === "agent_status" && e.data?.status === "complete"
+    );
+    if (resolved && !lastIncident) {
+      setLastIncident({ ts: resolved.timestamp, message: resolved.data?.message });
+    }
+  }, [events]);
+
+  const bandColor = { healthy: C.green, watch: C.yellow, at_risk: C.orange, critical: C.red };
+  const riskList = Object.values(risks);
+
+  // Churn history chart data (static baseline + dynamic risk)
   const all = [...churnHistory.map(d => ({ m: d.m })), ...churnForecast.map(d => ({ m: d.m }))];
-  const W = 600, H = 180, pL = 35, pR = 15, pT = 15, pB = 25, pW = W-pL-pR, pH = H-pT-pB, mx = 5;
+  const W = 600, H = 160, pL = 35, pR = 15, pT = 15, pB = 25, pW = W-pL-pR, pH = H-pT-pB, mx = 5;
   const x = i => pL + (i/(all.length-1))*pW;
   const y = v => pT + pH - (v/mx)*pH;
   const hPath = churnHistory.map((d,i) => `${i?'L':'M'}${x(i)},${y(d.v)}`).join('');
@@ -821,12 +910,20 @@ function ChurnTab() {
   const conn = `M${x(churnHistory.length-1)},${y(churnHistory[churnHistory.length-1].v)} L${x(churnHistory.length)},${y(churnForecast[0].v)}`;
   const bandU = churnForecast.map((d,i) => `${x(churnHistory.length+i)},${y(d.hi)}`).join(' L');
   const bandD = [...churnForecast].reverse().map((d,i) => `${x(churnHistory.length+churnForecast.length-1-i)},${y(d.lo)}`).join(' L');
-  const drivers = [{ d: "Network Quality < 70", pct: 34, seg: "Enterprise" }, { d: "Ticket Resolution > 48hrs", pct: 22, seg: "SMB" }, { d: "Price Sensitivity", pct: 18, seg: "Consumer" }, { d: "Feature Adoption Rate", pct: 14, seg: "All" }];
+
+  const drivers = [
+    { d: "Network Quality < 70", pct: 34, seg: "Enterprise" },
+    { d: "Ticket Resolution > 48hrs", pct: 22, seg: "SMB" },
+    { d: "Price Sensitivity", pct: 18, seg: "Consumer" },
+    { d: "Feature Adoption Rate", pct: 14, seg: "All" },
+  ];
+
   return (
     <div style={{ display: "flex", height: "100%", gap: 12 }}>
-      <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 12, overflow: "auto" }}>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10 }}>
-          {[{ l: "Current Churn", v: "3.4%", ch: "+0.2%", bad: true }, { l: "Forecast Q3", v: "2.8%", ch: "−0.6%", bad: false }, { l: "At-Risk", v: "847", ch: "+12%", bad: true }].map((c, i) => (
+      <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 10, overflow: "auto" }}>
+        {/* KPIs */}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10, flexShrink: 0 }}>
+          {[{ l: "Current Churn", v: "3.4%", ch: "+0.2%", bad: true }, { l: "Forecast Q3", v: "2.8%", ch: "−0.6%", bad: false }, { l: "At-Risk ARR", v: "$2.9M", ch: riskList.length > 0 ? `${riskList.filter(r => r.risk_band !== "healthy").length} LSPs` : "—", bad: riskList.some(r => r.risk_band === "at_risk" || r.risk_band === "critical") }].map((c, i) => (
             <div key={i} style={{ background: C.panel, border: `1px solid ${C.border}`, borderRadius: 8, padding: "12px 14px" }}>
               <div style={{ fontSize: 9, letterSpacing: 1, color: C.muted, marginBottom: 4 }}>{c.l}</div>
               <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
@@ -836,7 +933,63 @@ function ChurnTab() {
             </div>
           ))}
         </div>
-        <Panel title="Churn Rate — Actual vs Forecast" style={{ flex: 1, minHeight: 220 }}>
+
+        {/* Live SLA Risk per customer */}
+        {riskList.length > 0 && (
+          <div style={{ background: C.panel, border: `1px solid ${C.border}`, borderRadius: 8, padding: 12, flexShrink: 0 }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: C.text, marginBottom: 10 }}>Live SLA Risk — Customer LSPs</div>
+            {riskList.map(r => (
+              <div key={r.lsp_id} style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8, padding: "8px 10px", borderRadius: 6, background: "rgba(255,255,255,0.02)", border: `1px solid ${C.border}` }}>
+                <div style={{ flex: 1 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
+                    <span style={{ fontSize: 12, fontWeight: 600, color: C.text }}>{r.customer}</span>
+                    <span style={{ fontSize: 9, padding: "1px 6px", borderRadius: 3, background: bandColor[r.risk_band] + "18", color: bandColor[r.risk_band], fontFamily: "monospace", fontWeight: 700 }}>{r.risk_band}</span>
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <div style={{ flex: 1, height: 6, background: "rgba(255,255,255,0.06)", borderRadius: 3, overflow: "hidden" }}>
+                      <div style={{ width: `${r.risk_score}%`, height: "100%", background: bandColor[r.risk_band], borderRadius: 3, transition: "width 0.8s" }} />
+                    </div>
+                    <span style={{ fontSize: 11, fontWeight: 700, fontFamily: "monospace", color: bandColor[r.risk_band], minWidth: 36 }}>Risk: {r.risk_score}</span>
+                    <span style={{ fontSize: 11, fontFamily: "monospace", color: C.muted, minWidth: 60 }}>Churn: {r.churn_probability_pct}%</span>
+                  </div>
+                  <div style={{ fontSize: 10, color: C.muted, marginTop: 3 }}>
+                    {r.segment} · ARR ${(r.arr_usd / 1e6).toFixed(1)}M · {r.reroute_count} reroutes · {r.breach_90_count} SLA breaches
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Counterfactual panel — shown after incident resolution */}
+        {lastIncident && (
+          <div style={{ background: "rgba(16,185,129,0.05)", border: `1px solid ${C.green}33`, borderRadius: 8, padding: 12, flexShrink: 0 }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: C.green, marginBottom: 8 }}>✅ ORCA Impact — Revenue Protected</div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+              <div>
+                <div style={{ fontSize: 10, color: C.muted, marginBottom: 4 }}>Without ORCA response</div>
+                <div style={{ fontSize: 11, color: C.red, fontFamily: "monospace", lineHeight: 1.8 }}>
+                  lsp-customer-a degraded ~8 min<br/>
+                  Risk score: 12 → 71 (Healthy → At Risk)<br/>
+                  Churn probability: 1% → 78%<br/>
+                  ARR at risk: $2.4M
+                </div>
+              </div>
+              <div>
+                <div style={{ fontSize: 10, color: C.muted, marginBottom: 4 }}>With ORCA (47s response)</div>
+                <div style={{ fontSize: 11, color: C.green, fontFamily: "monospace", lineHeight: 1.8 }}>
+                  lsp-customer-a degraded &lt;1 min<br/>
+                  Risk score: 12 → 34 (Healthy → Watch)<br/>
+                  Churn probability: 1% → 5%<br/>
+                  Revenue protected: $2.4M ARR
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Churn trend chart */}
+        <Panel title="Churn Rate — Actual vs Forecast" style={{ flex: 1, minHeight: 200 }}>
           <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", height: "auto" }}>
             {[0,1,2,3,4,5].map(v => <g key={v}><line x1={pL} x2={W-pR} y1={y(v)} y2={y(v)} stroke="rgba(255,255,255,0.04)" /><text x={pL-6} y={y(v)+3} fill="#475569" fontSize={9} textAnchor="end" fontFamily="monospace">{v}%</text></g>)}
             {all.map((d,i) => <text key={i} x={x(i)} y={H-4} fill="#475569" fontSize={8} textAnchor="middle" fontFamily="monospace">{d.m}</text>)}
@@ -850,6 +1003,8 @@ function ChurnTab() {
           </svg>
         </Panel>
       </div>
+
+      {/* Right: Top Drivers */}
       <div style={{ width: 280, display: "flex", flexDirection: "column", gap: 10, flexShrink: 0, overflow: "auto" }}>
         <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: 1.5, textTransform: "uppercase", color: C.muted }}>Top Drivers</span>
         {drivers.map((d, i) => (
@@ -866,6 +1021,15 @@ function ChurnTab() {
             </div>
           </div>
         ))}
+        <div style={{ background: C.panel, border: `1px solid ${C.border}`, borderRadius: 8, padding: 10 }}>
+          <div style={{ fontSize: 10, fontWeight: 700, color: C.muted, letterSpacing: 1, textTransform: "uppercase", marginBottom: 8 }}>Model</div>
+          <div style={{ fontSize: 10, color: C.muted, lineHeight: 1.7 }}>
+            Risk score → churn via logistic curve<br/>
+            k=0.08 · midpoint=60<br/>
+            Enterprise 0.7× · SMB 1.0× · Consumer 1.4×<br/>
+            Window: 24h · 15min intervals
+          </div>
+        </div>
       </div>
     </div>
   );
@@ -990,8 +1154,8 @@ export default function App() {
           />
         )}
         {activeTab === "contracts" && <ContractStackTab />}
-        {activeTab === "security" && <SecurityTab />}
-        {activeTab === "churn" && <ChurnTab />}
+        {activeTab === "security" && <SecurityTab events={events} />}
+        {activeTab === "churn" && <ChurnTab events={events} />}
       </div>
     </div>
   );
