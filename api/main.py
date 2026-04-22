@@ -9,7 +9,7 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
-from agent.te_agent import ORCAAgent, get_config_proposals, update_proposal_status, clear_proposals
+from agent.te_agent import ORCAAgent, get_config_proposals, update_proposal_status, clear_proposals, get_security_alerts, clear_security_alerts
 from agent.adapter import ContainerlabAdapter
 from agent.notifications import send_email, build_tac_email, get_pending_emails, clear_emails
 
@@ -138,7 +138,77 @@ class ProposalAction(BaseModel):
     comment: str = ""
     changes: list = []
 
-@app.post("/api/config-proposals/{proposal_id}/approved")
+@app.post("/api/demo/inject-rogue-config")
+async def inject_rogue_config():
+    """Inject unauthorized config change for security breach demo."""
+    result = adapter.inject_rogue_config("R1")
+    # Add a security alarm to trigger ORCA detection
+    from agent.adapter import Alarm
+    import time
+    alarm = Alarm(
+        id=f"sec-alarm-{int(time.time())}",
+        severity="critical",
+        node="R1",
+        description="Security: Config drift detected on R1 — gNMI running config diverges from Git baseline"
+    )
+    adapter._alarms.append(alarm)
+    await manager.broadcast({
+        "type": "security_alarm", "timestamp": datetime.utcnow().isoformat(),
+        "data": {"node": "R1", "message": "Unauthorized config change detected on R1 — ORCA investigating"}
+    })
+    asyncio.create_task(_broadcast_state())
+    return {"success": True, "node": "R1", "changes": result.get("changes", []),
+            "message": "Rogue config injected — ORCA will detect on next analyze cycle"}
+
+@app.post("/api/demo/clear-rogue-config")
+async def clear_rogue_config():
+    """Clear injected rogue config."""
+    adapter.clear_rogue_config()
+    return {"success": True}
+
+# ── Security alerts ───────────────────────────────────────────────────────────
+@app.get("/api/security-alerts")
+async def get_alerts(): return {"alerts": get_security_alerts()}
+
+@app.delete("/api/security-alerts")
+async def delete_alerts(): clear_security_alerts(); return {"status": "cleared"}
+
+# ── Churn risk ────────────────────────────────────────────────────────────────
+@app.get("/api/churn-risk")
+async def get_churn_risk():
+    """Return latest churn risk scores for all customer LSPs."""
+    import math
+    lsp_meta = {
+        "lsp-customer-a": {"customer": "Customer-A", "segment": "Enterprise", "arr_usd": 2400000},
+        "lsp-customer-b": {"customer": "Customer-B", "segment": "SMB", "arr_usd": 480000},
+    }
+    segment_multiplier = {"Enterprise": 0.7, "SMB": 1.0}
+    risks = {}
+    for lsp_id, meta in lsp_meta.items():
+        history = adapter.get_lsp_history(lsp_id, 96) if hasattr(adapter, 'get_lsp_history') else []
+        utils = [h["util"] for h in history] if history else [35.0]
+        reroutes = sum(1 for h in history if h.get("rerouted", False))
+        breach_90 = sum(1 for u in utils if u >= 90)
+        breach_80 = sum(1 for u in utils if u >= 80)
+        time_degraded = breach_80 * 15
+        max_slots = max(len(utils), 1)
+        raw = (
+            0.35 * min(breach_90 / max(max_slots * 0.1, 1), 1.0) +
+            0.25 * min(time_degraded / 1440, 1.0) +
+            0.20 * min(reroutes / 5, 1.0) +
+            0.12 * min(breach_80 / max(max_slots * 0.2, 1), 1.0)
+        )
+        risk_score = round(min(raw * 100, 100), 1)
+        k, midpoint = 0.08, 60
+        base_prob = 1 / (1 + math.exp(-k * (risk_score - midpoint)))
+        churn_prob = round(min(base_prob * segment_multiplier.get(meta["segment"], 1.0) * 100, 99), 1)
+        band = "healthy" if risk_score <= 25 else "watch" if risk_score <= 55 else "at_risk" if risk_score <= 80 else "critical"
+        risks[lsp_id] = {**meta, "risk_score": risk_score, "risk_band": band,
+                         "churn_probability_pct": churn_prob, "reroute_count": reroutes,
+                         "breach_90_count": breach_90, "time_degraded_mins": time_degraded}
+    return {"risks": risks}
+
+
 @app.post("/api/config-proposals/{proposal_id}/approve")
 async def approve_proposal(proposal_id: str, body: ProposalAction = ProposalAction()):
     result = update_proposal_status(proposal_id, "approved")
