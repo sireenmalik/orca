@@ -4,28 +4,41 @@ import * as d3 from "d3";
 const API = "";
 const WS_URL = `ws://${window.location.host}/ws`;
 
+// ─── THEME ────────────────────────────────────────────────────────────────────
 const C = {
-  bg: "#0d1117", panel: "#161b22", border: "#30363d", text: "#e6edf3",
-  muted: "#8b949e", green: "#3fb950", yellow: "#d29922", orange: "#f0883e",
-  red: "#f85149", blue: "#58a6ff", accent: "#00b0f0", node: "#1f6feb",
-  panel2: "#1c2128",
+  bg: "#0a0f1e", panel: "#111827", border: "#1e293b", text: "#e2e8f0",
+  muted: "#64748b", green: "#10b981", yellow: "#eab308", orange: "#f97316",
+  red: "#ef4444", blue: "#06b6d4", purple: "#8b5cf6", accent: "#06b6d4",
 };
+const utilColor = u => u >= 90 ? C.red : u >= 80 ? C.orange : u >= 60 ? C.yellow : C.green;
+const sevColor = { critical: "#ef4444", high: "#f97316", medium: "#eab308", warning: "#eab308", low: "#06b6d4", info: "#8b5cf6" };
 
-const utilColor = u => u >= 90 ? C.red : u >= 85 ? C.orange : u >= 75 ? C.yellow : C.green;
+// ─── SHARED PANEL ─────────────────────────────────────────────────────────────
+function Panel({ title, badge, children, style }) {
+  return (
+    <div style={{ background: C.panel, border: `1px solid ${C.border}`, borderRadius: 8, display: "flex", flexDirection: "column", overflow: "hidden", ...style }}>
+      {title && (
+        <div style={{ padding: "10px 14px", borderBottom: `1px solid ${C.border}`, display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0 }}>
+          <span style={{ fontSize: 12, fontWeight: 700, color: C.text, letterSpacing: 0.3 }}>{title}</span>
+          {badge != null && badge > 0 && <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 10, background: C.red + "22", color: C.red, fontFamily: "monospace" }}>{badge}</span>}
+        </div>
+      )}
+      <div style={{ flex: 1, overflow: "auto", padding: 12 }}>{children}</div>
+    </div>
+  );
+}
 
-// ── Draggable Modal ────────────────────────────────────────────────────────────
+// ─── DRAGGABLE MODAL ──────────────────────────────────────────────────────────
 function Modal({ title, onClose, children, width = "780px" }) {
-  const [pos, setPos] = useState(null); // null = centered
+  const [pos, setPos] = useState(null);
   const dragging = useRef(false);
   const dragStart = useRef({ mx: 0, my: 0, px: 0, py: 0 });
   const modalRef = useRef(null);
-
   useEffect(() => {
     const onKey = e => { if (e.key === "Escape") onClose(); };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
-
   const onMouseDown = (e) => {
     if (e.button !== 0) return;
     e.preventDefault();
@@ -34,67 +47,35 @@ function Modal({ title, onClose, children, width = "780px" }) {
     const startX = pos ? pos.x : (window.innerWidth / 2 - rect.width / 2);
     const startY = pos ? pos.y : (window.innerHeight / 2 - rect.height / 2);
     dragStart.current = { mx: e.clientX, my: e.clientY, px: startX, py: startY };
-
     const onMove = (ev) => {
       if (!dragging.current) return;
-      const dx = ev.clientX - dragStart.current.mx;
-      const dy = ev.clientY - dragStart.current.my;
-      setPos({ x: dragStart.current.px + dx, y: dragStart.current.py + dy });
+      setPos({ x: dragStart.current.px + ev.clientX - dragStart.current.mx, y: dragStart.current.py + ev.clientY - dragStart.current.my });
     };
     const onUp = () => { dragging.current = false; window.removeEventListener("mousemove", onMove); window.removeEventListener("mouseup", onUp); };
     window.addEventListener("mousemove", onMove);
     window.addEventListener("mouseup", onUp);
   };
-
-  const posStyle = pos
-    ? { position: "fixed", left: pos.x, top: pos.y, transform: "none", margin: 0 }
-    : { position: "relative" };
-
+  const posStyle = pos ? { position: "fixed", left: pos.x, top: pos.y, transform: "none", margin: 0 } : { position: "relative" };
   return (
-    <div style={{
-      position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)",
-      display: "flex", alignItems: "center", justifyContent: "center",
-      zIndex: 1000, padding: "20px", pointerEvents: "all"
-    }} onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
-      <div ref={modalRef} style={{
-        background: C.panel, border: `1px solid ${C.border}`, borderRadius: "10px",
-        width: width, maxWidth: "96vw", maxHeight: "92vh",
-        display: "flex", flexDirection: "column",
-        boxShadow: "0 24px 60px rgba(0,0,0,0.8)",
-        ...posStyle
-      }}>
-        {/* Draggable header */}
-        <div onMouseDown={onMouseDown} style={{
-          display: "flex", justifyContent: "space-between", alignItems: "center",
-          padding: "13px 18px", borderBottom: `1px solid ${C.border}`, flexShrink: 0,
-          cursor: "grab", userSelect: "none",
-          borderRadius: "10px 10px 0 0",
-          background: "#1c2128"
-        }}>
-          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-            <span style={{ color: "#444", fontSize: "13px" }}>⠿</span>
-            <span style={{ color: C.text, fontWeight: "bold", fontSize: "14px" }}>{title}</span>
-          </div>
-          <button onClick={onClose} style={{
-            background: "transparent", border: "none", color: C.muted,
-            fontSize: "20px", cursor: "pointer", lineHeight: 1, padding: "0 4px"
-          }}>×</button>
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, padding: "20px" }}
+      onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
+      <div ref={modalRef} style={{ background: C.panel, border: `1px solid ${C.border}`, borderRadius: 10, width, maxWidth: "96vw", maxHeight: "92vh", display: "flex", flexDirection: "column", boxShadow: "0 24px 60px rgba(0,0,0,0.8)", ...posStyle }}>
+        <div onMouseDown={onMouseDown} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "13px 18px", borderBottom: `1px solid ${C.border}`, flexShrink: 0, cursor: "grab", userSelect: "none", background: "#151d2e", borderRadius: "10px 10px 0 0" }}>
+          <span style={{ color: C.text, fontWeight: 700, fontSize: 14 }}>{title}</span>
+          <button onClick={onClose} style={{ background: "transparent", border: "none", color: C.muted, fontSize: 20, cursor: "pointer" }}>×</button>
         </div>
-        <div style={{ flex: 1, minHeight: 0, overflow: "hidden", display: "flex", flexDirection: "column" }}>
-          {children}
-        </div>
+        <div style={{ flex: 1, minHeight: 0, overflow: "hidden", display: "flex", flexDirection: "column" }}>{children}</div>
       </div>
     </div>
   );
 }
 
-// ── Topology ──────────────────────────────────────────────────────────────────
+// ─── TOPOLOGY ─────────────────────────────────────────────────────────────────
 function TopologyMap({ nodes, links }) {
   const wrapRef = useRef(null);
   const svgRef = useRef(null);
   const linksKey = JSON.stringify(links);
   const nodesKey = JSON.stringify(nodes);
-
   const draw = useCallback(() => {
     if (!nodes || !links || !svgRef.current || !wrapRef.current) return;
     const W = wrapRef.current.clientWidth || 400;
@@ -135,275 +116,205 @@ function TopologyMap({ nodes, links }) {
       .attr("stroke", d => d.state === "down" ? C.red : C.accent).attr("stroke-width", 1.5).attr("opacity", 0.25);
     svg.append("g").selectAll("circle").data(nodeData).enter().append("circle")
       .attr("cx", d => d.x).attr("cy", d => d.y).attr("r", nodeR)
-      .attr("fill", d => d.state === "down" ? "#1a1a2e" : C.node)
+      .attr("fill", d => d.state === "down" ? "#1a1a2e" : "#1f6feb")
       .attr("stroke", d => d.state === "down" ? C.red : C.accent).attr("stroke-width", 2);
     svg.append("g").selectAll("text").data(nodeData).enter().append("text")
       .attr("x", d => d.x).attr("y", d => d.y).attr("text-anchor", "middle")
       .attr("dominant-baseline", "middle").attr("fill", C.text)
       .attr("font-size", fs + "px").attr("font-weight", "bold").attr("font-family", "Arial")
       .text(d => d.id);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [linksKey, nodesKey]);
-
   useEffect(() => {
     draw();
     const ro = new ResizeObserver(draw);
     if (wrapRef.current) ro.observe(wrapRef.current);
     return () => ro.disconnect();
   }, [draw]);
-
-  return (
-    <div ref={wrapRef} style={{ width: "100%", height: "100%" }}>
-      <svg ref={svgRef} style={{ display: "block", width: "100%", height: "100%" }} />
-    </div>
-  );
+  return <div ref={wrapRef} style={{ width: "100%", height: "100%" }}><svg ref={svgRef} style={{ display: "block" }} /></div>;
 }
 
-function UtilBars({ links }) {
-  return (
-    <div style={{ overflowY: "auto", height: "100%" }}>
-      {Object.entries(links || {}).map(([id, l]) => {
-        const u = l.utilization_pct || 0; const down = l.state === "down";
-        return (
-          <div key={id} style={{ marginBottom: "10px" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "3px" }}>
-              <span style={{ color: C.text, fontSize: "12px", fontFamily: "monospace" }}>{id}</span>
-              <span style={{ color: down ? C.red : utilColor(u), fontSize: "12px", fontWeight: "bold" }}>
-                {down ? "DOWN" : `${u.toFixed(1)}%`}
-              </span>
-            </div>
-            <div style={{ background: "#21262d", borderRadius: "3px", height: "5px" }}>
-              <div style={{ width: `${Math.min(100, u)}%`, background: down ? "#444" : utilColor(u),
-                height: "100%", borderRadius: "3px", transition: "width 0.6s ease" }} />
-            </div>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
+// ─── LOG TYPE STYLES ──────────────────────────────────────────────────────────
+const logTypeStyle = {
+  alert: { bg: "#ef444418", color: C.red, label: "ALERT" },
+  reasoning: { bg: "#8b5cf618", color: C.purple, label: "THINK" },
+  tool_call: { bg: "#06b6d418", color: C.blue, label: "TOOL" },
+  tool_result: { bg: "#10b98118", color: C.green, label: "RESULT" },
+  notification: { bg: "#eab30818", color: C.yellow, label: "NOTIFY" },
+  status: { bg: "#10b98118", color: C.green, label: "STATUS" },
+  agent_status: { bg: "#10b98118", color: C.green, label: "STATUS" },
+  git_command: { bg: "#06b6d418", color: C.blue, label: "GIT" },
+  pr_opened: { bg: "#8b5cf618", color: C.purple, label: "PR" },
+  agent_thinking: { bg: "#8b5cf618", color: C.purple, label: "THINK" },
+  state_update: { bg: "rgba(255,255,255,0.02)", color: C.muted, label: "STATE" },
+};
 
-function Alarms({ alarms }) {
-  const sc = s => s === "critical" ? C.red : s === "major" ? C.orange : C.yellow;
-  if (!alarms.length) return <div style={{ color: C.green, fontSize: "13px" }}>✅ No active alarms</div>;
+const LogEntry = memo(function LogEntry({ entry }) {
+  const s = logTypeStyle[entry.type] || logTypeStyle.status;
+  const msg = entry.message || entry.msg || JSON.stringify(entry.data || "");
+  const ts = entry.timestamp ? new Date(entry.timestamp * 1000).toLocaleTimeString() : "";
   return (
-    <div style={{ overflowY: "auto", height: "100%" }}>
-      {alarms.map((a, i) => (
-        <div key={i} style={{ padding: "7px 10px", marginBottom: "6px", borderRadius: "4px",
-          borderLeft: `3px solid ${sc(a.severity)}`, background: "#21262d" }}>
-          <span style={{ color: sc(a.severity), fontWeight: "bold", fontSize: "10px", textTransform: "uppercase" }}>{a.severity}</span>
-          <span style={{ color: C.muted, marginLeft: "6px", fontSize: "11px" }}>{a.node}</span>
-          <div style={{ color: C.text, fontSize: "12px", marginTop: "2px" }}>{a.description}</div>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function FaultPanel({ links, onAction, lastResult }) {
-  const [link, setLink] = useState("R1-R4");
-  const [level, setLevel] = useState(92);
-  const btn = (label, color, onClick) => (
-    <button onClick={onClick} style={{ background: color + "22", border: `2px solid ${color}`, color,
-      padding: "11px 0", borderRadius: "6px", cursor: "pointer", fontSize: "13px", fontWeight: "bold", width: "100%" }}>
-      {label}
-    </button>
-  );
-  return (
-    <div>
-      <div style={{ display: "flex", gap: "16px", flexWrap: "wrap", marginBottom: "14px" }}>
-        <div style={{ flex: "1", minWidth: "140px" }}>
-          <div style={{ color: C.muted, fontSize: "10px", textTransform: "uppercase", letterSpacing: "0.8px", marginBottom: "5px" }}>Target Link</div>
-          <select value={link} onChange={e => setLink(e.target.value)} style={{ background: "#21262d", color: C.text,
-            border: `1px solid ${C.border}`, padding: "8px 10px", borderRadius: "5px", fontSize: "13px", width: "100%" }}>
-            {Object.keys(links || {}).map(id => <option key={id}>{id}</option>)}
-          </select>
-        </div>
-        <div style={{ flex: "3", minWidth: "200px" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "5px" }}>
-            <span style={{ color: C.muted, fontSize: "10px", textTransform: "uppercase", letterSpacing: "0.8px" }}>Congestion Level</span>
-            <span style={{ color: utilColor(level), fontWeight: "bold", fontSize: "13px", fontFamily: "monospace" }}>{level}%</span>
-          </div>
-          <input type="range" min="75" max="99" value={level} onChange={e => setLevel(+e.target.value)}
-            style={{ width: "100%", accentColor: utilColor(level), cursor: "pointer" }} />
-        </div>
+    <div style={{ padding: "8px 10px", marginBottom: 4, borderRadius: 6, background: s.bg, borderLeft: `2px solid ${s.color}` }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 3 }}>
+        <span style={{ fontSize: 9, fontWeight: 700, padding: "1px 5px", borderRadius: 3, background: s.color + "22", color: s.color, fontFamily: "monospace" }}>{s.label}</span>
+        {ts && <span style={{ fontSize: 9, color: C.muted, fontFamily: "monospace" }}>{ts}</span>}
       </div>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
-        {btn("💥 Inject Failure", C.red, () => onAction("failure", link))}
-        {btn("📈 Inject Congestion", C.orange, () => onAction("congestion", link, level))}
-        {btn("✅ Restore Link", C.green, () => onAction("restore", link))}
-        {btn("🔄 Reset All", C.blue, () => onAction("reset"))}
+      <div style={{ fontSize: 12, color: C.text, lineHeight: 1.6, fontFamily: entry.type === "tool_call" || entry.type === "tool_result" || entry.type === "git_command" ? "monospace" : "inherit" }}>
+        {msg}
       </div>
-      {lastResult && (
-        <div style={{ marginTop: "10px", padding: "7px 12px", borderRadius: "5px",
-          background: lastResult.success ? C.green + "18" : C.red + "18",
-          border: `1px solid ${lastResult.success ? C.green : C.red}`,
-          color: lastResult.success ? C.green : C.red, fontSize: "12px", fontFamily: "monospace" }}>
-          {lastResult.success ? "✅" : "❌"} {lastResult.message || JSON.stringify(lastResult).slice(0, 100)}
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ── Agent Log Modal ────────────────────────────────────────────────────────────
-const LogEntry = memo(function LogEntry({ event, meta, fmt }) {
-  const m = meta[event.type] || { icon: "ℹ️", color: C.muted };
-  const text = fmt(event.type, event.data || {});
-  return (
-    <div style={{
-      marginBottom: event.type === "git_command" ? "1px" : "8px",
-      padding: event.type === "git_command" ? "3px 10px 3px 12px" : "8px 10px",
-      borderRadius: event.type === "git_command" ? "3px" : "5px",
-      background: event.type === "git_command" ? "#0d1f0d" : C.panel2,
-      border: event.type === "git_command" ? "none" : `1px solid ${C.border}`,
-      borderLeft: event.type === "git_command" ? "3px solid #3fb950" : undefined,
-    }}>
-      {event.type !== "git_command" && (
-        <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "4px" }}>
-          <span>{m.icon}</span>
-          <span style={{ color: C.muted, fontSize: "10px" }}>{new Date(event.timestamp).toLocaleTimeString()}</span>
-          <span style={{ color: m.color, fontSize: "10px", textTransform: "uppercase",
-            fontWeight: "bold", letterSpacing: "0.5px" }}>{event.type.replace(/_/g, " ")}</span>
-        </div>
-      )}
-      <div style={{ color: m.color, whiteSpace: "pre-wrap", wordBreak: "break-word",
-        fontFamily: "monospace", fontSize: event.type === "git_command" ? "12px" : "inherit",
-        fontWeight: event.type === "git_command" ? "bold" : "normal" }}>{text}</div>
     </div>
   );
 });
 
-function AgentLogModal({ events, onClose }) {
-  const ref = useRef(null);
+// ─── AGENT LOG PANEL ──────────────────────────────────────────────────────────
+function AgentLogPanel({ events, onOpenModal }) {
   const [filter, setFilter] = useState("all");
-  const [search, setSearch] = useState("");
-  const scrollLocked = useRef(false);
-  const prevMeaningfulLen = useRef(0);
-  const [copied, setCopied] = useState(false);
+  const bottomRef = useRef(null);
+  const prevLenRef = useRef(0);
 
-  // Mount: scroll to bottom, attach scroll listener
-  useEffect(() => {
-    scrollLocked.current = false;
-    prevMeaningfulLen.current = 0;
-    const el = ref.current;
-    if (!el) return;
-    setTimeout(() => { if (ref.current) ref.current.scrollTop = ref.current.scrollHeight; }, 100);
-    const onScroll = () => {
-        if (!ref.current) return;
-        const dist = ref.current.scrollHeight - ref.current.scrollTop - ref.current.clientHeight;
-        scrollLocked.current = dist > 100;
-    };
-    el.addEventListener('scroll', onScroll, { passive: true });
-    return () => el.removeEventListener('scroll', onScroll);
-  }, []);
-
-  // Auto-scroll only when NEW meaningful events arrive AND user hasn't scrolled up
-  const meaningfulLen = useMemo(() => events.filter(e => e.type !== 'state_update').length, [events]);
+  const filtered = useMemo(() => {
+    const meaningful = events.filter(e => e.type !== "state_update");
+    if (filter === "all") return meaningful;
+    const map = { THINK: ["reasoning", "agent_thinking"], TOOL: ["tool_call", "tool_result", "git_command", "pr_opened"], ALERT: ["alert"] };
+    return meaningful.filter(e => (map[filter] || []).includes(e.type));
+  }, [events, filter]);
 
   useLayoutEffect(() => {
-    if (meaningfulLen <= prevMeaningfulLen.current) return;
-    prevMeaningfulLen.current = meaningfulLen;
-    if (scrollLocked.current) return;
-    if (ref.current) ref.current.scrollTop = ref.current.scrollHeight;
-  }, [meaningfulLen]);
-
-  const meta = useMemo(() => ({
-    agent_reasoning: { icon: "🧠", color: C.blue, label: "Reasoning" },
-    tool_call:       { icon: "🔧", color: C.yellow, label: "Tool Call" },
-    tool_result:     { icon: "✅", color: C.green, label: "Tool Result" },
-    tool_error:      { icon: "❌", color: C.red, label: "Error" },
-    agent_status:    { icon: "📡", color: C.accent, label: "Status" },
-    agent_thinking:  { icon: "💭", color: C.muted, label: "Thinking" },
-    state_update:    { icon: "📊", color: C.muted, label: "State" },
-    git_command:     { icon: "⌥", color: "#7ee787", label: "Git" },
-  }), []);
-
-  const fmt = useCallback((t, d) => {
-    if (t === "agent_reasoning") return d.text;
-    if (t === "tool_call") return `${d.tool}(\n  ${JSON.stringify(d.inputs, null, 2).slice(1, -1).trim()}\n)`;
-    if (t === "tool_result") return `${d.tool} →\n${JSON.stringify(d.result || {}, null, 2)}`;
-    if (t === "agent_status" || t === "agent_thinking") return d.message;
-    if (t === "state_update") return `Network updated — ${Object.keys(d.links || {}).length} links, ${(d.alarms || []).length} alarms`;
-    if (t === "git_command") return d.command;
-    if (t === "pr_opened") return `PR #${d.pr_number} opened\n${d.pr_url}`;
-    return JSON.stringify(d, null, 2);
-  }, []);
-
-  const types = ["all", ...Object.keys(meta)];
-  const filtered = useMemo(() => events.filter(e => {
-    if (filter !== "all" && e.type !== filter) return false;
-    if (search) {
-      const text = fmt(e.type, e.data || {}).toLowerCase();
-      if (!text.includes(search.toLowerCase())) return false;
+    const meaningful = events.filter(e => e.type !== "state_update");
+    if (meaningful.length > prevLenRef.current) {
+      bottomRef.current?.scrollIntoView({ behavior: "smooth" });
     }
-    return true;
-  }), [events, filter, search, fmt]);
-
-  const copyAll = useCallback(() => {
-    const text = events.map(e => {
-        const time = new Date(e.timestamp).toLocaleTimeString();
-        const d = e.data || {};
-        const content = d.text || d.message || d.command || JSON.stringify(d);
-        return `[${time}] ${e.type.toUpperCase()}\n${content}`;
-    }).join('\n\n');
-    try {
-      if (navigator.clipboard && window.isSecureContext) {
-        navigator.clipboard.writeText(text).then(() => { setCopied(true); setTimeout(() => setCopied(false), 2000); });
-      } else {
-        const ta = document.createElement("textarea");
-        ta.value = text;
-        ta.style.cssText = "position:fixed;opacity:0;left:-9999px";
-        document.body.appendChild(ta);
-        ta.focus(); ta.select();
-        document.execCommand("copy");
-        document.body.removeChild(ta);
-        setCopied(true); setTimeout(() => setCopied(false), 2000);
-      }
-    } catch (err) {
-      const blob = new Blob([text], { type: "text/plain" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url; a.download = "orca-agent-log.txt";
-      a.click(); URL.revokeObjectURL(url);
-    }
+    prevLenRef.current = meaningful.length;
   }, [events]);
 
   return (
-    <Modal title={`Agent Reasoning Log — ${events.length} events`} onClose={onClose} width="900px">
-      {/* Toolbar */}
-      <div style={{ padding: "10px 16px", borderBottom: `1px solid ${C.border}`, flexShrink: 0,
-        display: "flex", gap: "10px", flexWrap: "wrap", alignItems: "center" }}>
-        <input value={search} onChange={e => setSearch(e.target.value)}
-          placeholder="Search events..." style={{ background: "#21262d", border: `1px solid ${C.border}`,
-          color: C.text, padding: "5px 10px", borderRadius: "5px", fontSize: "12px", width: "200px" }} />
-        <select value={filter} onChange={e => setFilter(e.target.value)}
-          style={{ background: "#21262d", border: `1px solid ${C.border}`, color: C.text,
-          padding: "5px 10px", borderRadius: "5px", fontSize: "12px" }}>
-          {types.map(t => <option key={t} value={t}>{t === "all" ? "All types" : meta[t]?.label || t}</option>)}
-        </select>
-        <span style={{ color: C.muted, fontSize: "11px" }}>{filtered.length} events</span>
-        <button onClick={copyAll} style={{ marginLeft: "auto", background: copied ? "#238636" : "#21262d",
-          border: `1px solid ${copied ? "#3fb950" : C.border}`, color: copied ? "#fff" : C.muted, padding: "5px 12px",
-          borderRadius: "5px", cursor: "pointer", fontSize: "12px", transition: "all 0.2s" }}>
-          {copied ? "Copied!" : "📋 Copy All"}</button>
-      </div>
-      {/* Log entries */}
-      <div ref={ref}
-        style={{ flex: 1, minHeight: 0, overflowY: "scroll", padding: "12px 16px",
-        fontFamily: "monospace", fontSize: "12px", lineHeight: "1.6" }}>
-        {filtered.length === 0 && (
-          <div style={{ color: C.muted, textAlign: "center", padding: "40px" }}>No events match filter</div>
-        )}
-        {filtered.map((e, i) => (
-          <LogEntry key={`${e.timestamp}-${e.type}-${i}`} event={e} meta={meta} fmt={fmt} />
+    <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
+      <div style={{ display: "flex", gap: 4, marginBottom: 8, flexWrap: "wrap", flexShrink: 0, padding: "8px 12px 0" }}>
+        {["all", "THINK", "TOOL", "ALERT"].map(f => (
+          <button key={f} onClick={() => setFilter(f)} style={{ padding: "3px 8px", borderRadius: 4, fontSize: 9, fontWeight: 700, cursor: "pointer", background: filter === f ? C.blue + "18" : "rgba(255,255,255,0.03)", border: `1px solid ${filter === f ? C.blue + "44" : C.border}`, color: filter === f ? C.blue : C.muted, fontFamily: "monospace" }}>{f.toUpperCase()}</button>
         ))}
+        <button onClick={onOpenModal} style={{ marginLeft: "auto", padding: "3px 8px", borderRadius: 4, fontSize: 9, fontWeight: 700, cursor: "pointer", background: "rgba(255,255,255,0.03)", border: `1px solid ${C.border}`, color: C.muted }}>⤢ Expand</button>
+      </div>
+      <div style={{ flex: 1, overflow: "auto", padding: "0 12px 12px" }}>
+        {filtered.map((e, i) => <LogEntry key={i} entry={e} />)}
+        <div ref={bottomRef} />
+      </div>
+    </div>
+  );
+}
+
+// ─── AGENT LOG MODAL ─────────────────────────────────────────────────────────
+function AgentLogModal({ events, onClose }) {
+  const [filter, setFilter] = useState("all");
+  const [search, setSearch] = useState("");
+  const [copied, setCopied] = useState(false);
+  const containerRef = useRef(null);
+  const prevLenRef = useRef(0);
+
+  const filtered = useMemo(() => {
+    const meaningful = events.filter(e => e.type !== "state_update");
+    let r = meaningful;
+    if (filter !== "all") {
+      const map = { THINK: ["reasoning", "agent_thinking"], TOOL: ["tool_call", "tool_result", "git_command", "pr_opened"], ALERT: ["alert"] };
+      r = r.filter(e => (map[filter] || []).includes(e.type));
+    }
+    if (search) r = r.filter(e => (e.message || e.msg || "").toLowerCase().includes(search.toLowerCase()));
+    return r;
+  }, [events, filter, search]);
+
+  useLayoutEffect(() => {
+    const meaningful = events.filter(e => e.type !== "state_update");
+    if (containerRef.current && meaningful.length > prevLenRef.current) {
+      const el = containerRef.current;
+      if (el.scrollTop + el.clientHeight > el.scrollHeight - 100) {
+        el.scrollTop = el.scrollHeight;
+      }
+    }
+    prevLenRef.current = meaningful.length;
+  }, [events]);
+
+  const copyAll = () => {
+    const text = filtered.map(e => `[${e.type}] ${e.message || e.msg || ""}`).join("\n");
+    if (navigator.clipboard) navigator.clipboard.writeText(text).then(() => { setCopied(true); setTimeout(() => setCopied(false), 2000); });
+  };
+
+  return (
+    <Modal title="Agent Reasoning Log" onClose={onClose} width="900px">
+      <div style={{ padding: "10px 16px", borderBottom: `1px solid ${C.border}`, display: "flex", gap: 6, flexWrap: "wrap", flexShrink: 0 }}>
+        {["all", "THINK", "TOOL", "ALERT"].map(f => (
+          <button key={f} onClick={() => setFilter(f)} style={{ padding: "3px 8px", borderRadius: 4, fontSize: 9, fontWeight: 700, cursor: "pointer", background: filter === f ? C.blue + "18" : "rgba(255,255,255,0.03)", border: `1px solid ${filter === f ? C.blue + "44" : C.border}`, color: filter === f ? C.blue : C.muted, fontFamily: "monospace" }}>{f.toUpperCase()}</button>
+        ))}
+        <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search..." style={{ marginLeft: 8, padding: "3px 8px", borderRadius: 4, fontSize: 11, background: "rgba(255,255,255,0.04)", border: `1px solid ${C.border}`, color: C.text, outline: "none", width: 160 }} />
+        <button onClick={copyAll} style={{ marginLeft: "auto", padding: "3px 10px", borderRadius: 4, fontSize: 10, cursor: "pointer", background: copied ? C.green + "18" : "rgba(255,255,255,0.04)", border: `1px solid ${copied ? C.green + "44" : C.border}`, color: copied ? C.green : C.muted }}>
+          {copied ? "✓ Copied" : "Copy All"}
+        </button>
+      </div>
+      <div ref={containerRef} style={{ flex: 1, overflow: "auto", padding: "12px 16px" }}>
+        {filtered.map((e, i) => <LogEntry key={i} entry={e} />)}
       </div>
     </Modal>
   );
 }
 
-// ── Email Modal ────────────────────────────────────────────────────────────────
+// ─── CONFIG PROPOSAL MODAL ────────────────────────────────────────────────────
+function ConfigModal({ proposal, onClose, onAction, streaming }) {
+  const [comment, setComment] = useState("");
+  const [action, setAction] = useState(null);
+  const sc = s => s === "approved" ? C.green : s === "rejected" ? C.red : s === "committed" ? C.blue : C.yellow;
+
+  const handleAction = async (act) => {
+    setAction(act);
+    await onAction(proposal.id, act, comment, proposal.changes);
+    onClose();
+  };
+
+  return (
+    <Modal title={`Config Proposal — ${proposal.title}`} onClose={onClose} width="860px">
+      <div style={{ flex: 1, overflow: "auto", padding: 20, display: "flex", gap: 16 }}>
+        <div style={{ flex: 1 }}>
+          <div style={{ marginBottom: 12 }}>
+            <div style={{ fontSize: 11, color: C.muted, marginBottom: 4 }}>Reason</div>
+            <div style={{ fontSize: 13, color: C.text, lineHeight: 1.5 }}>{proposal.reason}</div>
+          </div>
+          {proposal.projected_improvement && (
+            <div style={{ fontSize: 12, fontFamily: "monospace", color: C.green, marginBottom: 12 }}>
+              Projected: {proposal.projected_improvement}
+            </div>
+          )}
+          <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginBottom: 14 }}>
+            {Object.entries(proposal.validation_checks || {}).map(([k, v]) => (
+              <span key={k} style={{ fontSize: 9, padding: "2px 6px", borderRadius: 3, background: v ? C.green + "12" : C.red + "12", color: v ? C.green : C.red, fontFamily: "monospace" }}>{v ? "✓" : "✗"} {k}</span>
+            ))}
+          </div>
+          <div style={{ background: "#0d1117", borderRadius: 6, padding: 12, fontFamily: "monospace", fontSize: 12, lineHeight: 1.7, maxHeight: 300, overflow: "auto" }}>
+            {(proposal.diff || []).map((d, i) => (
+              <div key={i} style={{ padding: "1px 6px", background: d.type === "add" ? "rgba(16,185,129,0.08)" : d.type === "remove" ? "rgba(239,68,68,0.08)" : "transparent", color: d.type === "add" ? C.green : d.type === "remove" ? C.red : C.muted }}>
+                {d.type === "add" ? "+ " : d.type === "remove" ? "- " : "  "}{d.line || d.content}
+              </div>
+            ))}
+          </div>
+        </div>
+        <div style={{ width: 260, flexShrink: 0 }}>
+          <div style={{ fontSize: 11, color: C.muted, marginBottom: 6 }}>Status</div>
+          <span style={{ fontSize: 12, padding: "3px 10px", borderRadius: 4, background: sc(proposal.status) + "18", color: sc(proposal.status), fontFamily: "monospace", fontWeight: 700 }}>{proposal.status}</span>
+          <div style={{ marginTop: 16, fontSize: 11, color: C.muted, marginBottom: 6 }}>Comment (optional)</div>
+          <textarea value={comment} onChange={e => setComment(e.target.value)} rows={3} style={{ width: "100%", padding: 8, background: "rgba(255,255,255,0.04)", border: `1px solid ${C.border}`, borderRadius: 6, color: C.text, fontSize: 12, resize: "none", outline: "none" }} />
+          {proposal.status === "pending" && (
+            <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+              <button onClick={() => handleAction("approved")} disabled={!!action} style={{ flex: 1, padding: 10, borderRadius: 6, fontSize: 12, fontWeight: 700, cursor: "pointer", background: C.green + "18", border: `1px solid ${C.green}44`, color: C.green }}>
+                {action === "approved" ? "Pushing..." : "✓ Approve & Push"}
+              </button>
+              <button onClick={() => handleAction("rejected")} disabled={!!action} style={{ flex: 1, padding: 10, borderRadius: 6, fontSize: 12, fontWeight: 700, cursor: "pointer", background: C.red + "18", border: `1px solid ${C.red}44`, color: C.red }}>
+                ✗ Reject
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+// ─── EMAIL MODAL ──────────────────────────────────────────────────────────────
 function EmailModal({ email, onClose, onSend }) {
   const [subject, setSubject] = useState(email.subject);
   const [body, setBody] = useState(email.body);
@@ -413,583 +324,72 @@ function EmailModal({ email, onClose, onSend }) {
 
   const handleSend = async () => {
     setSending(true);
-    // Update mailto link with edited content
     await onSend({ ...email, subject, body, to });
-    setSending(false);
     setSent(true);
-    setTimeout(onClose, 1200);
-  };
-
-  const mailto = `mailto:${encodeURIComponent(to)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body.slice(0, 1800))}`;
-  const sc = subject.includes("CRITICAL") || subject.includes("P1") ? C.red
-           : subject.includes("TAC") || subject.includes("P2") ? C.orange : C.green;
-
-  return (
-    <Modal title="Email Composer" onClose={onClose} width="820px">
-      {/* Fields */}
-      <div style={{ padding: "14px 16px", borderBottom: `1px solid ${C.border}`, flexShrink: 0 }}>
-        <div style={{ display: "grid", gridTemplateColumns: "60px 1fr", gap: "8px", alignItems: "center", marginBottom: "8px" }}>
-          <span style={{ color: C.muted, fontSize: "12px" }}>To</span>
-          <input value={to} onChange={e => setTo(e.target.value)}
-            style={{ background: "#21262d", border: `1px solid ${C.border}`, color: C.text,
-            padding: "6px 10px", borderRadius: "5px", fontSize: "13px" }} />
-        </div>
-        <div style={{ display: "grid", gridTemplateColumns: "60px 1fr", gap: "8px", alignItems: "center" }}>
-          <span style={{ color: C.muted, fontSize: "12px" }}>Subject</span>
-          <input value={subject} onChange={e => setSubject(e.target.value)}
-            style={{ background: "#21262d", border: `1px solid ${sc}44`, color: sc,
-            padding: "6px 10px", borderRadius: "5px", fontSize: "13px", fontWeight: "bold" }} />
-        </div>
-      </div>
-      {/* Body — editable */}
-      <div style={{ flex: 1, minHeight: 0, padding: "12px 16px", display: "flex", flexDirection: "column" }}>
-        <div style={{ color: C.muted, fontSize: "10px", textTransform: "uppercase",
-          letterSpacing: "0.8px", marginBottom: "8px", flexShrink: 0 }}>Message Body — editable</div>
-        <textarea value={body} onChange={e => setBody(e.target.value)}
-          style={{ flex: 1, minHeight: "260px", background: "#21262d", border: `1px solid ${C.border}`,
-          color: C.text, padding: "12px", borderRadius: "6px", fontFamily: "monospace",
-          fontSize: "12px", lineHeight: "1.7", resize: "vertical" }} />
-      </div>
-      {/* Actions */}
-      <div style={{ padding: "12px 16px", borderTop: `1px solid ${C.border}`, flexShrink: 0,
-        display: "flex", gap: "10px", justifyContent: "flex-end" }}>
-        <button onClick={onClose} style={{ background: "transparent", border: `1px solid ${C.border}`,
-          color: C.muted, padding: "8px 16px", borderRadius: "6px", cursor: "pointer", fontSize: "13px" }}>
-          Cancel
-        </button>
-        <a href={mailto} style={{ background: C.blue + "22", border: `1px solid ${C.blue}`,
-          color: C.blue, padding: "8px 16px", borderRadius: "6px", cursor: "pointer",
-          fontSize: "13px", textDecoration: "none", fontWeight: "bold" }}>
-          📬 Open in Mail Client
-        </a>
-        <button onClick={handleSend} disabled={sending || sent}
-          style={{ background: sent ? C.green + "22" : C.green + "22",
-          border: `2px solid ${sent ? C.green : C.green}`,
-          color: sent ? C.green : C.green, padding: "8px 20px",
-          borderRadius: "6px", cursor: "pointer", fontSize: "13px", fontWeight: "bold",
-          opacity: sending ? 0.6 : 1 }}>
-          {sent ? "✅ Sent!" : sending ? "Sending..." : "✉️ Send via SendGrid"}
-        </button>
-      </div>
-    </Modal>
-  );
-}
-
-// ── Config Modal ───────────────────────────────────────────────────────────────
-function ConfigModal({ proposal, onClose, onAction }) {
-  const [editedChanges, setEditedChanges] = useState(
-    (proposal.changes || []).map(c => ({ ...c, new_config_edited: c.new_config }))
-  );
-  const [comment, setComment] = useState("");
-  const [action, setAction] = useState(null);
-  const [activeChange, setActiveChange] = useState(0);
-
-  const currentChange = editedChanges[activeChange] || {};
-
-  const updateConfig = (val) => {
-    setEditedChanges(prev => prev.map((c, i) => i === activeChange ? { ...c, new_config_edited: val } : c));
-  };
-
-  const renderDiff = (change) => {
-    const current = (change.current_config || "").split("\n").filter(l => l.trim());
-    const newConf = (change.new_config_edited || change.new_config || "").split("\n").filter(l => l.trim());
-    const lines = [];
-    current.forEach(l => { if (!newConf.includes(l)) lines.push({ type: "removed", text: l }); });
-    newConf.forEach(l => { if (!current.includes(l)) lines.push({ type: "added", text: l }); });
-    current.forEach(l => { if (newConf.includes(l)) lines.push({ type: "unchanged", text: l }); });
-    lines.sort((a, b) => ({ unchanged: 0, removed: 1, added: 2 }[a.type] - ({ unchanged: 0, removed: 1, added: 2 }[b.type])));
-    return lines;
-  };
-
-  const handleAction = async (type) => {
-    setAction(type);
-    await onAction(proposal.id, type, comment, editedChanges);
+    setSending(false);
     setTimeout(onClose, 1000);
   };
 
-  const statusColor = s => s === "approved" ? C.green : s === "rejected" ? C.red : C.yellow;
+  const mailtoLink = `mailto:${to}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
 
   return (
-    <Modal title={`Config Proposal — ${proposal.title}`} onClose={onClose} width="960px">
-      <div style={{ flex: 1, minHeight: 0, display: "flex", overflow: "hidden" }}>
-
-        {/* Left sidebar — summary + validation */}
-        <div style={{ width: "260px", flexShrink: 0, borderRight: `1px solid ${C.border}`,
-          overflowY: "auto", padding: "14px" }}>
-
-          {/* Status */}
-          <div style={{ marginBottom: "14px", padding: "8px 10px", borderRadius: "6px",
-            background: statusColor(proposal.status) + "18", border: `1px solid ${statusColor(proposal.status)}44`,
-            color: statusColor(proposal.status), fontSize: "12px", fontWeight: "bold", textAlign: "center" }}>
-            {proposal.status.toUpperCase()}
-          </div>
-
-          {/* Reason */}
-          <div style={{ marginBottom: "14px" }}>
-            <div style={{ color: C.muted, fontSize: "10px", textTransform: "uppercase",
-              letterSpacing: "0.8px", marginBottom: "5px" }}>Reason</div>
-            <div style={{ color: C.text, fontSize: "12px", lineHeight: "1.6" }}>{proposal.reason}</div>
-          </div>
-
-          {/* Improvement */}
-          {proposal.projected_improvement && (
-            <div style={{ marginBottom: "14px", padding: "8px 10px", background: C.green + "14",
-              borderRadius: "5px", border: `1px solid ${C.green}33` }}>
-              <div style={{ color: C.muted, fontSize: "10px", marginBottom: "3px" }}>Projected</div>
-              <div style={{ color: C.green, fontSize: "12px", fontWeight: "bold" }}>{proposal.projected_improvement}</div>
-            </div>
-          )}
-
-          {/* Validation */}
-          <div style={{ marginBottom: "14px" }}>
-            <div style={{ color: C.muted, fontSize: "10px", textTransform: "uppercase",
-              letterSpacing: "0.8px", marginBottom: "8px" }}>Validation</div>
-            {Object.entries({
-              "Syntax":       proposal.validation?.syntax || "✅ Nokia SR-OS 22.x",
-              "Semantic":     proposal.validation?.semantic || "✅ All hops reachable",
-              "Mission 1":    proposal.validation?.mission_1 || "✅ All links < 90%",
-              "Mission 2":    proposal.validation?.mission_2 || "✅ Max util improves",
-              "Digital Twin": proposal.validation?.digital_twin || "✅ Simulated — stable",
-              "Policy":       proposal.validation?.policy || "✅ Within policy",
-            }).map(([k, v]) => (
-              <div key={k} style={{ marginBottom: "5px", padding: "5px 8px",
-                background: "#21262d", borderRadius: "4px" }}>
-                <div style={{ color: C.muted, fontSize: "10px" }}>{k}</div>
-                <div style={{ color: C.green, fontSize: "11px" }}>{v}</div>
-              </div>
-            ))}
-          </div>
-
-          {/* Device tabs */}
-          {editedChanges.length > 1 && (
-            <div style={{ marginBottom: "14px" }}>
-              <div style={{ color: C.muted, fontSize: "10px", textTransform: "uppercase",
-                letterSpacing: "0.8px", marginBottom: "6px" }}>Devices</div>
-              {editedChanges.map((c, i) => (
-                <button key={i} onClick={() => setActiveChange(i)} style={{
-                  display: "block", width: "100%", textAlign: "left",
-                  background: activeChange === i ? C.blue + "22" : "transparent",
-                  border: `1px solid ${activeChange === i ? C.blue : C.border}`,
-                  color: activeChange === i ? C.blue : C.muted,
-                  padding: "6px 10px", borderRadius: "5px", cursor: "pointer",
-                  fontSize: "12px", marginBottom: "4px" }}>
-                  📄 {c.device}
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-
-        {/* Right — diff + edit */}
-        <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", overflow: "hidden" }}>
-
-          {/* Device header */}
-          <div style={{ padding: "10px 14px", borderBottom: `1px solid ${C.border}`,
-            flexShrink: 0, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-            <div>
-              <span style={{ color: C.accent, fontWeight: "bold", fontSize: "13px" }}>
-                📄 {currentChange.device}
-              </span>
-              <span style={{ color: C.muted, marginLeft: "8px", fontSize: "11px" }}>{currentChange.type}</span>
-            </div>
-            {currentChange.diff_summary && (
-              <span style={{ color: C.yellow, fontSize: "11px" }}>{currentChange.diff_summary}</span>
-            )}
-          </div>
-
-          {/* Split view — diff left, edit right */}
-          <div style={{ flex: 1, minHeight: 0, display: "flex", overflow: "hidden" }}>
-
-            {/* Diff view — scrollable */}
-            <div style={{ flex: 1, minWidth: 0, borderRight: `1px solid ${C.border}`, overflow: "hidden",
-              display: "flex", flexDirection: "column" }}>
-              <div style={{ padding: "6px 12px", background: "#0d1117", flexShrink: 0,
-                color: C.muted, fontSize: "10px", textTransform: "uppercase", letterSpacing: "0.8px" }}>
-                Diff — current vs proposed
-              </div>
-              <div style={{ flex: 1, minHeight: 0, overflowY: "auto" }}>
-                <table style={{ width: "100%", borderCollapse: "collapse", fontFamily: "monospace", fontSize: "12px" }}>
-                  <tbody>
-                    {renderDiff(currentChange).map((line, li) => (
-                      <tr key={li} style={{
-                        background: line.type === "added" ? "#1a3626" :
-                                    line.type === "removed" ? "#3c1c1c" : "transparent" }}>
-                        <td style={{ width: "28px", textAlign: "center", padding: "2px 4px",
-                          color: line.type === "added" ? C.green : line.type === "removed" ? C.red : "#444",
-                          borderRight: `1px solid ${C.border}`, userSelect: "none", fontSize: "13px",
-                          fontWeight: "bold" }}>
-                          {line.type === "added" ? "+" : line.type === "removed" ? "−" : " "}
-                        </td>
-                        <td style={{ padding: "2px 10px",
-                          color: line.type === "added" ? "#7ee787" :
-                                 line.type === "removed" ? "#ff7b72" : "#555",
-                          whiteSpace: "pre", lineHeight: "1.6",
-                          fontWeight: line.type !== "unchanged" ? "600" : "normal" }}>
-                          {line.text}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-
-            {/* Edit view — scrollable textarea */}
-            <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", overflow: "hidden" }}>
-              <div style={{ padding: "6px 12px", background: "#0d1117", flexShrink: 0,
-                color: C.muted, fontSize: "10px", textTransform: "uppercase", letterSpacing: "0.8px" }}>
-                Proposed config — editable
-              </div>
-              <textarea value={currentChange.new_config_edited || currentChange.new_config || ""}
-                onChange={e => updateConfig(e.target.value)}
-                style={{ flex: 1, minHeight: 0, background: "#0d1117", border: "none",
-                color: C.text, padding: "8px 12px", fontFamily: "monospace",
-                fontSize: "12px", lineHeight: "1.7", resize: "none", outline: "none" }} />
-            </div>
-          </div>
-
-          {/* Comment box */}
-          <div style={{ padding: "10px 14px", borderTop: `1px solid ${C.border}`, flexShrink: 0 }}>
-            <input value={comment} onChange={e => setComment(e.target.value)}
-              placeholder="Add a comment (optional)..."
-              style={{ width: "100%", background: "#21262d", border: `1px solid ${C.border}`,
-              color: C.text, padding: "7px 12px", borderRadius: "5px", fontSize: "12px" }} />
-          </div>
-
-          {/* Action buttons */}
-          {(proposal.status === "pending" || proposal.status === "saved") && (
-            <div style={{ padding: "10px 14px", borderTop: `1px solid ${C.border}`, flexShrink: 0,
-              display: "flex", gap: "10px" }}>
-              <button onClick={() => handleAction("rejected")} disabled={!!action}
-                style={{ background: C.red + "22", border: `2px solid ${C.red}`, color: C.red,
-                padding: "9px 20px", borderRadius: "6px", cursor: "pointer",
-                fontSize: "13px", fontWeight: "bold", opacity: action ? 0.6 : 1 }}>
-                ❌ Reject
-              </button>
-              <button onClick={() => handleAction("saved")} disabled={!!action}
-                style={{ background: C.yellow + "22", border: `2px solid ${C.yellow}`, color: C.yellow,
-                padding: "9px 20px", borderRadius: "6px", cursor: "pointer",
-                fontSize: "13px", fontWeight: "bold", opacity: action ? 0.6 : 1 }}>
-                💾 Save
-              </button>
-              <button onClick={() => handleAction("committed")} disabled={!!action}
-                style={{ background: C.blue + "22", border: `2px solid ${C.blue}`, color: C.blue,
-                padding: "9px 20px", borderRadius: "6px", cursor: "pointer",
-                fontSize: "13px", fontWeight: "bold", opacity: action ? 0.6 : 1 }}>
-                🔀 Save & Commit
-              </button>
-              <button onClick={() => handleAction("approved")} disabled={!!action}
-                style={{ marginLeft: "auto", background: C.green + "22", border: `2px solid ${C.green}`,
-                color: C.green, padding: "9px 24px", borderRadius: "6px", cursor: "pointer",
-                fontSize: "13px", fontWeight: "bold", opacity: action ? 0.6 : 1 }}>
-                {action === "approved" ? "Pushing..." : "✅ Approve & Push"}
-              </button>
-            </div>
-          )}
+    <Modal title="Email Draft" onClose={onClose} width="640px">
+      <div style={{ padding: 20, display: "flex", flexDirection: "column", gap: 12, flex: 1, overflow: "auto" }}>
+        <div><label style={{ fontSize: 11, color: C.muted }}>To</label><input value={to} onChange={e => setTo(e.target.value)} style={{ width: "100%", marginTop: 4, padding: 8, background: "rgba(255,255,255,0.04)", border: `1px solid ${C.border}`, borderRadius: 6, color: C.text, fontSize: 13, outline: "none" }} /></div>
+        <div><label style={{ fontSize: 11, color: C.muted }}>Subject</label><input value={subject} onChange={e => setSubject(e.target.value)} style={{ width: "100%", marginTop: 4, padding: 8, background: "rgba(255,255,255,0.04)", border: `1px solid ${C.border}`, borderRadius: 6, color: C.text, fontSize: 13, outline: "none" }} /></div>
+        <div style={{ flex: 1 }}><label style={{ fontSize: 11, color: C.muted }}>Body</label><textarea value={body} onChange={e => setBody(e.target.value)} rows={10} style={{ width: "100%", marginTop: 4, padding: 8, background: "rgba(255,255,255,0.04)", border: `1px solid ${C.border}`, borderRadius: 6, color: C.text, fontSize: 13, resize: "vertical", outline: "none", fontFamily: "inherit" }} /></div>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button onClick={handleSend} disabled={sending || sent} style={{ flex: 1, padding: 10, borderRadius: 6, fontSize: 12, fontWeight: 700, cursor: "pointer", background: sent ? C.green + "18" : C.blue + "18", border: `1px solid ${sent ? C.green + "44" : C.blue + "44"}`, color: sent ? C.green : C.blue }}>
+            {sent ? "✓ Sent" : sending ? "Sending..." : "Send via API"}
+          </button>
+          <a href={mailtoLink} style={{ flex: 1, padding: 10, borderRadius: 6, fontSize: 12, fontWeight: 700, cursor: "pointer", background: "rgba(255,255,255,0.04)", border: `1px solid ${C.border}`, color: C.muted, textDecoration: "none", textAlign: "center" }}>Open in Mail Client</a>
         </div>
       </div>
     </Modal>
   );
 }
 
-// ── Agent Log Panel (compact, opens modal) ────────────────────────────────────
-function AgentLog({ events, onOpenModal }) {
-  const ref = useRef(null);
-  const lockedByUser = useRef(false);
-  const prevEventCount = useRef(0);
+// ─── CONTROLS CARD ────────────────────────────────────────────────────────────
+function ControlsCard({ agentRunning, onToggleAgent, onAnalyze, onAction, wsStatus }) {
+  const [link, setLink] = useState("R1-R4");
+  const [level, setLevel] = useState(92);
+  const links = ["R1-R2","R2-R3","R3-R4","R4-R5","R5-R6","R6-R1","R1-R4","R2-R5"];
 
-  // Attach scroll listener once on mount — track if user scrolled up
-  useEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    const onScroll = () => {
-      const dist = el.scrollHeight - el.scrollTop - el.clientHeight;
-      lockedByUser.current = dist > 80;
-    };
-    el.addEventListener('scroll', onScroll, { passive: true });
-    return () => el.removeEventListener('scroll', onScroll);
-  }, []);
-
-  // Only scroll to bottom when NEW events arrive AND user hasn't scrolled up
-  useEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    if (events.length > prevEventCount.current && !lockedByUser.current) {
-      el.scrollTop = el.scrollHeight;
-    }
-    prevEventCount.current = events.length;
-  }, [events]);
-  const meta = {
-    agent_reasoning: { icon: "🧠", color: C.blue },
-    tool_call:       { icon: "🔧", color: C.yellow },
-    tool_result:     { icon: "✅", color: C.green },
-    tool_error:      { icon: "❌", color: C.red },
-    agent_status:    { icon: "📡", color: C.accent },
-    agent_thinking:  { icon: "💭", color: C.muted },
-    state_update:    { icon: "📊", color: C.muted },
-    git_command:     { icon: "⌥", color: "#7ee787" },
-    pr_opened:       { icon: "🔀", color: C.blue },
-  };
-  const fmt = (t, d) => {
-    if (t === "agent_reasoning") return d.text;
-    if (t === "tool_call") return `${d.tool}(${JSON.stringify(d.inputs)})`;
-    if (t === "tool_result") return `${d.tool} → ${JSON.stringify(d.result || {}).slice(0, 120)}`;
-    if (t === "agent_status" || t === "agent_thinking") return d.message;
-    if (t === "state_update") return `Network updated — ${Object.keys(d.links || {}).length} links, ${(d.alarms || []).length} alarms`;
-    if (t === "git_command") return d.command;
-    if (t === "pr_opened") return `PR #${d.pr_number} opened — ${d.pr_url}`;
-    return JSON.stringify(d).slice(0, 100);
-  };
   return (
-    <div style={{ height: "100%", display: "flex", flexDirection: "column" }}>
-      {events.length > 0 && (
-        <button onClick={onOpenModal} style={{ flexShrink: 0, marginBottom: "8px",
-          background: "transparent", border: `1px solid ${C.border}`, color: C.muted,
-          padding: "4px 10px", borderRadius: "4px", cursor: "pointer", fontSize: "11px",
-          alignSelf: "flex-end" }}>
-          ⤢ Expand
-        </button>
-      )}
-      <div ref={ref}
-        style={{ flex: 1, minHeight: 0, overflowY: "scroll", fontFamily: "monospace",
-        fontSize: "12px", lineHeight: "1.6", paddingRight: "4px" }}>
-        {events.length === 0 && (
-          <div style={{ color: C.muted, padding: "20px", textAlign: "center" }}>
-            Click <strong style={{ color: C.blue }}>Analyze</strong> or <strong style={{ color: C.green }}>Start Agent</strong> to begin.
-          </div>
-        )}
-        {events.map((e, i) => {
-          const m = meta[e.type] || { icon: "ℹ️", color: C.muted };
-          const isGit = e.type === "git_command";
-          const isPR = e.type === "pr_opened";
-          return (
-            <div key={i} style={{
-              marginBottom: "4px", paddingBottom: "4px",
-              borderBottom: `1px solid ${C.border}`,
-              ...(isGit ? {
-                background: "#0d1f0d",
-                borderLeft: "3px solid #3fb950",
-                paddingLeft: "8px",
-                borderBottom: "none",
-                marginBottom: "1px",
-              } : {}),
-              ...(isPR ? {
-                background: C.blue + "11",
-                borderLeft: `3px solid ${C.blue}`,
-                paddingLeft: "8px",
-                borderRadius: "4px",
-                padding: "6px 8px",
-              } : {})
-            }}>
-              <span style={{ color: C.muted, fontSize: "10px" }}>{new Date(e.timestamp).toLocaleTimeString()}</span>
-              <span style={{ margin: "0 5px" }}>{m.icon}</span>
-              {isPR && e.data?.pr_url ? (
-                <span style={{ color: m.color }}>
-                  PR #{e.data.pr_number} opened — {" "}
-                  <a href={e.data.pr_url} target="_blank" rel="noreferrer"
-                    style={{ color: C.blue, fontWeight: "bold" }}>
-                    View on GitHub ↗
-                  </a>
-                </span>
-              ) : (
-                <span style={{ color: m.color, whiteSpace: "pre-wrap", wordBreak: "break-word",
-                  fontWeight: isGit ? "bold" : "normal" }}>{fmt(e.type, e.data)}</span>
-              )}
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
-// ── Email Outbox Panel (compact, opens modal) ─────────────────────────────────
-function EmailInbox({ onOpenEmail }) {
-  const [emails, setEmails] = useState([]);
-  useEffect(() => {
-    const poll = async () => {
-      try { const r = await fetch(`${API}/api/emails`); const d = await r.json(); setEmails(d.emails || []); } catch {}
-    };
-    poll();
-    const t = setInterval(poll, 3000);
-    return () => clearInterval(t);
-  }, []);
-  const clear = async () => { await fetch(`${API}/api/emails`, { method: "DELETE" }); setEmails([]); };
-  const sc = s => s.includes("CRITICAL") || s.includes("P1") ? C.red : s.includes("TAC") || s.includes("P2") ? C.orange : C.green;
-  return (
-    <div style={{ height: "100%", display: "flex", flexDirection: "column" }}>
-      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "8px", flexShrink: 0 }}>
-        <span style={{ color: C.muted, fontSize: "11px" }}>{emails.length} email{emails.length !== 1 ? "s" : ""}</span>
-        {emails.length > 0 && (
-          <button onClick={clear} style={{ background: "transparent", border: `1px solid ${C.border}`,
-            color: C.muted, padding: "2px 8px", borderRadius: "4px", cursor: "pointer", fontSize: "11px" }}>Clear</button>
-        )}
-      </div>
-      {emails.length === 0 && (
-        <div style={{ color: C.muted, textAlign: "center", padding: "20px", fontSize: "12px" }}>
-          No emails yet — run ORCA to generate alerts.
+    <div style={{ background: C.panel, border: `1px solid ${C.border}`, borderRadius: 8, padding: 10 }}>
+      <div style={{ fontSize: 10, fontWeight: 700, color: C.muted, letterSpacing: 1, textTransform: "uppercase", marginBottom: 8 }}>Controls</div>
+      <div style={{ marginBottom: 8 }}>
+        <select value={link} onChange={e => setLink(e.target.value)} style={{ width: "100%", padding: "4px 6px", background: "rgba(255,255,255,0.04)", border: `1px solid ${C.border}`, borderRadius: 4, color: C.text, fontSize: 11, marginBottom: 6 }}>
+          {links.map(l => <option key={l} value={l}>{l}</option>)}
+        </select>
+        <div style={{ display: "flex", gap: 4 }}>
+          <input type="range" min={50} max={99} value={level} onChange={e => setLevel(Number(e.target.value))} style={{ flex: 1 }} />
+          <span style={{ fontSize: 10, color: C.muted, fontFamily: "monospace", width: 30 }}>{level}%</span>
         </div>
-      )}
-      <div style={{ flex: 1, minHeight: 0, overflowY: "auto" }}>
-        {emails.map(e => (
-          <div key={e.id} onClick={() => onOpenEmail(e)}
-            style={{ padding: "9px 11px", marginBottom: "6px", borderRadius: "6px",
-            background: C.panel2, border: `1px solid ${C.border}`, cursor: "pointer",
-            transition: "border-color 0.15s" }}
-            onMouseEnter={el => el.currentTarget.style.borderColor = C.blue}
-            onMouseLeave={el => el.currentTarget.style.borderColor = C.border}>
-            <div style={{ display: "flex", alignItems: "center", gap: "6px", marginBottom: "3px" }}>
-              <div style={{ width: "7px", height: "7px", borderRadius: "50%", background: sc(e.subject), flexShrink: 0 }} />
-              <span style={{ color: C.text, fontSize: "12px", fontWeight: "bold",
-                overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 }}>
-                {e.subject.replace(/[🔴🟠🟡🟢⚡]/g, "").trim().slice(0, 45)}
-              </span>
-            </div>
-            <div style={{ color: C.muted, fontSize: "10px" }}>
-              To: {e.to} · {new Date(e.timestamp).toLocaleTimeString()}
-            </div>
-          </div>
-        ))}
+      </div>
+      <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
+        <button onClick={() => onAction("failure", link)} style={{ padding: "5px 9px", borderRadius: 5, fontSize: 10, fontWeight: 600, cursor: "pointer", background: C.red + "18", border: `1px solid ${C.red}44`, color: C.red }}>Inject Fault</button>
+        <button onClick={() => onAction("congestion", link, level)} style={{ padding: "5px 9px", borderRadius: 5, fontSize: 10, fontWeight: 600, cursor: "pointer", background: C.orange + "18", border: `1px solid ${C.orange}44`, color: C.orange }}>Congest</button>
+        <button onClick={() => onAction("restore", link)} style={{ padding: "5px 9px", borderRadius: 5, fontSize: 10, fontWeight: 600, cursor: "pointer", background: C.green + "18", border: `1px solid ${C.green}44`, color: C.green }}>Restore</button>
+        <button onClick={() => onAction("reset")} style={{ padding: "5px 9px", borderRadius: 5, fontSize: 10, fontWeight: 600, cursor: "pointer", background: "rgba(255,255,255,0.04)", border: `1px solid ${C.border}`, color: C.muted }}>Reset</button>
+        <button onClick={onAnalyze} style={{ padding: "5px 9px", borderRadius: 5, fontSize: 10, fontWeight: 600, cursor: "pointer", background: C.blue + "18", border: `1px solid ${C.blue}44`, color: C.blue }}>🔍 Analyze</button>
       </div>
     </div>
   );
 }
 
-// ── Config Proposals Panel (compact, opens modal) ─────────────────────────────
-function ConfigPanel({ onOpenProposal }) {
+// ─── OPERATIONS TAB ──────────────────────────────────────────────────────────
+function OperationsTab({ state, events, agentRunning, wsStatus, onToggleAgent, onAnalyze, onAction, onConfigAction, onEmailSend, logModalOpen, setLogModalOpen, emailModal, setEmailModal, configModal, setConfigModal }) {
   const [proposals, setProposals] = useState([]);
-  useEffect(() => {
-    const poll = async () => {
-      try { const r = await fetch(`${API}/api/config-proposals`); const d = await r.json(); setProposals(d.proposals || []); } catch {}
-    };
-    poll();
-    const t = setInterval(poll, 3000);
-    return () => clearInterval(t);
-  }, []);
-  const clear = async () => { await fetch(`${API}/api/config-proposals`, { method: "DELETE" }); setProposals([]); };
-  const sc = s => s === "approved" ? C.green : s === "rejected" ? C.red : s === "committed" ? C.blue : C.yellow;
-  const si = s => s === "approved" ? "✅" : s === "rejected" ? "❌" : s === "committed" ? "🔀" : s === "saved" ? "💾" : "⏳";
-  return (
-    <div style={{ height: "100%", display: "flex", flexDirection: "column" }}>
-      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "8px", flexShrink: 0 }}>
-        <span style={{ color: C.muted, fontSize: "11px" }}>{proposals.length} proposal{proposals.length !== 1 ? "s" : ""}</span>
-        {proposals.length > 0 && (
-          <button onClick={clear} style={{ background: "transparent", border: `1px solid ${C.border}`,
-            color: C.muted, padding: "2px 8px", borderRadius: "4px", cursor: "pointer", fontSize: "11px" }}>Clear</button>
-        )}
-      </div>
-      {proposals.length === 0 && (
-        <div style={{ color: C.muted, textAlign: "center", padding: "20px", fontSize: "12px" }}>
-          No proposals yet — run ORCA after a fault.
-        </div>
-      )}
-      <div style={{ flex: 1, minHeight: 0, overflowY: "auto" }}>
-        {proposals.map(p => (
-          <div key={p.id} onClick={() => onOpenProposal(p)}
-            style={{ padding: "9px 11px", marginBottom: "6px", borderRadius: "6px",
-            background: C.panel2, border: `1px solid ${sc(p.status)}44`, cursor: "pointer" }}
-            onMouseEnter={el => el.currentTarget.style.borderColor = C.blue}
-            onMouseLeave={el => el.currentTarget.style.borderColor = sc(p.status) + "44"}>
-            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "3px" }}>
-              <span style={{ color: C.text, fontSize: "12px", fontWeight: "bold",
-                overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 }}>
-                {p.title?.slice(0, 40)}
-              </span>
-              <span style={{ color: sc(p.status), fontSize: "12px", marginLeft: "6px" }}>{si(p.status)}</span>
-            </div>
-            <div style={{ display: "flex", justifyContent: "space-between" }}>
-              <span style={{ color: sc(p.status), fontSize: "10px", textTransform: "uppercase" }}>{p.status}</span>
-              <span style={{ color: C.muted, fontSize: "10px" }}>{new Date(p.timestamp).toLocaleTimeString()}</span>
-            </div>
-            {p.projected_improvement && (
-              <div style={{ color: C.green, fontSize: "10px", marginTop: "2px" }}>📈 {p.projected_improvement}</div>
-            )}
-            {p.pr_url && (
-              <a href={p.pr_url} target="_blank" rel="noreferrer"
-                style={{ color: C.blue, fontSize: "10px", marginTop: "2px", display: "block",
-                textDecoration: "none", fontWeight: "bold" }}
-                onClick={e => e.stopPropagation()}>
-                🔀 PR #{p.pr_number} — View on GitHub ↗
-              </a>
-            )}
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function Panel({ title, children, style = {}, action }) {
-  return (
-    <div style={{ background: C.panel, border: `1px solid ${C.border}`, borderRadius: "8px",
-      padding: "14px", display: "flex", flexDirection: "column", overflow: "hidden", ...style }}>
-      {title && (
-        <div style={{ color: C.muted, fontSize: "10px", fontWeight: "bold", textTransform: "uppercase",
-          letterSpacing: "1.2px", borderBottom: `1px solid ${C.border}`,
-          paddingBottom: "8px", marginBottom: "12px", flexShrink: 0,
-          display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <span>{title}</span>
-          {action}
-        </div>
-      )}
-      <div style={{ flex: 1, minHeight: 0, overflow: "hidden" }}>{children}</div>
-    </div>
-  );
-}
-
-const TABS = ["Topology", "Utilization", "Controls", "Agent Log", "Emails", "Config"];
-
-function TabBar({ active, onChange, configBadge }) {
-  return (
-    <div style={{ display: "flex", background: C.panel, borderBottom: `1px solid ${C.border}`, flexShrink: 0 }}>
-      {TABS.map(t => (
-        <button key={t} onClick={() => onChange(t)} style={{ flex: 1, padding: "10px 2px",
-          background: "transparent", border: "none",
-          borderBottom: active === t ? `2px solid ${C.accent}` : "2px solid transparent",
-          color: active === t ? C.accent : C.muted,
-          fontSize: "11px", fontWeight: active === t ? "bold" : "normal",
-          cursor: "pointer", whiteSpace: "nowrap", position: "relative" }}>
-          {t}
-          {t === "Config" && configBadge > 0 && (
-            <span style={{ position: "absolute", top: "4px", right: "1px", background: C.yellow,
-              color: "#000", borderRadius: "8px", padding: "0 4px", fontSize: "9px", fontWeight: "bold" }}>
-              {configBadge}
-            </span>
-          )}
-        </button>
-      ))}
-    </div>
-  );
-}
-
-export default function App() {
-  const [state, setState] = useState({ nodes: {}, links: {}, lsps: {}, alarms: [] });
-  const [events, setEvents] = useState([]);
-  const [agentRunning, setAgentRunning] = useState(false);
-  const [wsStatus, setWsStatus] = useState("connecting");
-  const [tab, setTab] = useState("Topology");
-  const [lastResult, setLastResult] = useState(null);
-  const [isMobile, setIsMobile] = useState(window.innerWidth < 900);
-  const [configBadge, setConfigBadge] = useState(0);
-  const wsRef = useRef(null);
-
-  // Modal state
-  const [logModalOpen, setLogModalOpen] = useState(false);
-  const [emailModal, setEmailModal] = useState(null);
-  const [configModal, setConfigModal] = useState(null);
-
-  useEffect(() => {
-    const check = () => setIsMobile(window.innerWidth < 900);
-    window.addEventListener("resize", check);
-    return () => window.removeEventListener("resize", check);
-  }, []);
+  const [emails, setEmails] = useState([]);
+  const [notifications, setNotifications] = useState([]);
 
   useEffect(() => {
     const poll = async () => {
       try {
         const r = await fetch(`${API}/api/config-proposals`);
         const d = await r.json();
-        setConfigBadge((d.proposals || []).filter(p => p.status === "pending").length);
+        setProposals(d.proposals || []);
       } catch {}
     };
     poll();
@@ -997,11 +397,367 @@ export default function App() {
     return () => clearInterval(t);
   }, []);
 
+  useEffect(() => {
+    const poll = async () => {
+      try {
+        const r = await fetch(`${API}/api/emails`);
+        const d = await r.json();
+        setEmails(d.emails || []);
+      } catch {}
+    };
+    poll();
+    const t = setInterval(poll, 8000);
+    return () => clearInterval(t);
+  }, []);
+
+  // Extract notifications from events
+  useEffect(() => {
+    const notifs = events.filter(e => e.type === "notification" || e.type === "pr_opened")
+      .slice(-5)
+      .map((e, i) => ({ id: i, msg: e.message || e.msg, type: e.type, ts: e.timestamp }));
+    setNotifications(notifs);
+  }, [events]);
+
+  const alarms = state.alarms || [];
+  const pendingProposals = proposals.filter(p => p.status === "pending").length;
+
+  return (
+    <div style={{ display: "flex", height: "100%", gap: 12 }}>
+      {/* LEFT 60% */}
+      <div style={{ width: "60%", display: "flex", flexDirection: "column", gap: 12, minHeight: 0 }}>
+        {/* TOP: Topology + Controls */}
+        <div style={{ height: "40%", display: "flex", gap: 12, flexShrink: 0 }}>
+          <Panel title="Network Topology" style={{ flex: 1 }}>
+            <TopologyMap nodes={state.nodes || {}} links={state.links || {}} />
+          </Panel>
+          <div style={{ width: 220, display: "flex", flexDirection: "column", gap: 8, flexShrink: 0 }}>
+            {/* Agent status */}
+            <div style={{ background: C.panel, border: `1px solid ${C.border}`, borderRadius: 8, padding: "10px 12px", display: "flex", alignItems: "center", gap: 8 }}>
+              <div style={{ width: 8, height: 8, borderRadius: "50%", background: wsStatus === "connected" ? C.green : C.red, boxShadow: `0 0 8px ${wsStatus === "connected" ? C.green : C.red}55` }} />
+              <span style={{ fontSize: 11, color: C.text, fontWeight: 600 }}>{agentRunning ? "Agent Running" : "Agent Stopped"}</span>
+              <button onClick={onToggleAgent} style={{ marginLeft: "auto", padding: "4px 10px", borderRadius: 5, fontSize: 10, fontWeight: 700, background: agentRunning ? C.red + "18" : C.green + "18", border: `1px solid ${agentRunning ? C.red + "44" : C.green + "44"}`, color: agentRunning ? C.red : C.green, cursor: "pointer" }}>
+                {agentRunning ? "⏹ Stop" : "▶ Start"}
+              </button>
+            </div>
+            {/* Alarms */}
+            <Panel title="Alarms" badge={alarms.filter(a => a.severity === "critical").length} style={{ flex: 1 }}>
+              {alarms.length === 0 ? (
+                <div style={{ fontSize: 11, color: C.muted, textAlign: "center", paddingTop: 8 }}>No active alarms</div>
+              ) : alarms.slice(-5).map((a, i) => (
+                <div key={i} style={{ padding: "5px 0", borderBottom: i < alarms.length - 1 ? `1px solid ${C.border}` : "none", display: "flex", gap: 6, alignItems: "start" }}>
+                  <span style={{ fontSize: 9, fontWeight: 700, padding: "1px 5px", borderRadius: 3, background: (sevColor[a.severity] || C.yellow) + "18", color: sevColor[a.severity] || C.yellow, fontFamily: "monospace", flexShrink: 0, marginTop: 1 }}>{(a.severity || "warn").slice(0,4).toUpperCase()}</span>
+                  <span style={{ fontSize: 11, color: C.text, lineHeight: 1.4 }}>{a.description || a.message}</span>
+                </div>
+              ))}
+            </Panel>
+            {/* Controls */}
+            <ControlsCard agentRunning={agentRunning} onToggleAgent={onToggleAgent} onAnalyze={onAnalyze} onAction={onAction} wsStatus={wsStatus} />
+          </div>
+        </div>
+
+        {/* BOTTOM: Config + Notifications + Emails */}
+        <div style={{ flex: 1, display: "flex", gap: 12, minHeight: 0 }}>
+          {/* Config Proposals */}
+          <Panel title="Config Proposals" badge={pendingProposals} style={{ flex: 1 }}>
+            {proposals.length === 0 ? (
+              <div style={{ fontSize: 11, color: C.muted, textAlign: "center", paddingTop: 12 }}>No proposals</div>
+            ) : proposals.map(cfg => (
+              <div key={cfg.id} onClick={() => setConfigModal(cfg)} style={{ background: "rgba(255,255,255,0.02)", border: `1px solid ${C.border}`, borderRadius: 8, padding: 12, marginBottom: 8, cursor: "pointer", borderLeft: `3px solid ${C.blue}` }}>
+                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
+                  <span style={{ fontSize: 13, fontWeight: 600, color: C.text }}>{cfg.title}</span>
+                  <span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 4, background: C.yellow + "18", color: C.yellow, fontFamily: "monospace", fontWeight: 700 }}>{cfg.status}</span>
+                </div>
+                <div style={{ fontSize: 11, color: C.muted, marginBottom: 8, lineHeight: 1.5 }}>{cfg.reason}</div>
+                {cfg.projected_improvement && <div style={{ fontSize: 11, fontFamily: "monospace", color: C.green, marginBottom: 8 }}>Projected: {cfg.projected_improvement}</div>}
+                <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginBottom: 10 }}>
+                  {Object.entries(cfg.validation_checks || {}).map(([k, v]) => (
+                    <span key={k} style={{ fontSize: 9, padding: "2px 6px", borderRadius: 3, background: v ? C.green + "12" : C.red + "12", color: v ? C.green : C.red, fontFamily: "monospace" }}>{v ? "✓" : "✗"} {k}</span>
+                  ))}
+                </div>
+                <div style={{ background: "#0d1117", borderRadius: 6, padding: 8, fontFamily: "monospace", fontSize: 11, lineHeight: 1.7, maxHeight: 120, overflow: "auto" }}>
+                  {(cfg.diff || []).slice(0, 8).map((d, i) => (
+                    <div key={i} style={{ padding: "1px 6px", background: d.type === "add" ? "rgba(16,185,129,0.08)" : d.type === "remove" ? "rgba(239,68,68,0.08)" : "transparent", color: d.type === "add" ? C.green : d.type === "remove" ? C.red : C.muted }}>
+                      {d.type === "add" ? "+ " : d.type === "remove" ? "- " : "  "}{d.line || d.content}
+                    </div>
+                  ))}
+                </div>
+                {cfg.status === "pending" && (
+                  <div style={{ display: "flex", gap: 8, marginTop: 10 }} onClick={e => e.stopPropagation()}>
+                    <button onClick={() => onConfigAction(cfg.id, "approved", "", cfg.changes)} style={{ flex: 1, padding: 8, borderRadius: 6, fontSize: 11, fontWeight: 700, cursor: "pointer", background: C.green + "18", border: `1px solid ${C.green}44`, color: C.green }}>✓ Approve & Push</button>
+                    <button onClick={() => onConfigAction(cfg.id, "rejected", "", cfg.changes)} style={{ flex: 1, padding: 8, borderRadius: 6, fontSize: 11, fontWeight: 700, cursor: "pointer", background: C.red + "18", border: `1px solid ${C.red}44`, color: C.red }}>✗ Reject</button>
+                  </div>
+                )}
+              </div>
+            ))}
+          </Panel>
+
+          {/* Notifications + Emails */}
+          <div style={{ width: "45%", display: "flex", flexDirection: "column", gap: 12, minHeight: 0 }}>
+            <Panel title="Notifications" style={{ flex: 1 }}>
+              {notifications.length === 0 ? (
+                <div style={{ fontSize: 11, color: C.muted, textAlign: "center", paddingTop: 8 }}>No notifications</div>
+              ) : notifications.map((n, i) => (
+                <div key={i} style={{ padding: "8px 0", borderBottom: `1px solid ${C.border}`, display: "flex", flexDirection: "column", gap: 4 }}>
+                  <span style={{ fontSize: 11, fontWeight: 600, color: n.type === "pr_opened" ? C.purple : C.blue, fontFamily: "monospace" }}>{n.type === "pr_opened" ? "GitHub PR" : "Notification"}</span>
+                  <div style={{ fontSize: 11, color: C.text, lineHeight: 1.4 }}>{n.msg}</div>
+                </div>
+              ))}
+            </Panel>
+            <Panel title="📧 Email Outbox" badge={emails.length} style={{ flex: 1 }}>
+              {emails.length === 0 ? (
+                <div style={{ fontSize: 11, color: C.muted, textAlign: "center", paddingTop: 8 }}>No queued emails</div>
+              ) : emails.map(e => (
+                <div key={e.id} onClick={() => setEmailModal(e)} style={{ background: "rgba(255,255,255,0.02)", border: `1px solid ${C.border}`, borderRadius: 8, padding: 10, marginBottom: 8, cursor: "pointer", borderLeft: `3px solid ${C.yellow}` }}>
+                  <div style={{ fontSize: 10, color: C.muted, fontFamily: "monospace", marginBottom: 3 }}>To: {e.to}</div>
+                  <div style={{ fontSize: 12, fontWeight: 600, color: C.text, marginBottom: 4 }}>{e.subject}</div>
+                  <div style={{ fontSize: 11, color: C.muted, lineHeight: 1.4, maxHeight: 44, overflow: "hidden" }}>{(e.body || "").slice(0, 120)}...</div>
+                  <div style={{ display: "flex", gap: 6, marginTop: 8 }} onClick={ev => ev.stopPropagation()}>
+                    <a href={`mailto:${e.to}?subject=${encodeURIComponent(e.subject)}&body=${encodeURIComponent(e.body)}`} style={{ padding: "4px 10px", borderRadius: 4, fontSize: 10, fontWeight: 600, background: C.green + "18", border: `1px solid ${C.green}44`, color: C.green, textDecoration: "none" }}>Open in Mail</a>
+                    <button onClick={() => setEmailModal(e)} style={{ padding: "4px 10px", borderRadius: 4, fontSize: 10, fontWeight: 600, background: "rgba(255,255,255,0.04)", border: `1px solid ${C.border}`, color: C.muted, cursor: "pointer" }}>Edit</button>
+                  </div>
+                </div>
+              ))}
+            </Panel>
+          </div>
+        </div>
+      </div>
+
+      {/* RIGHT 40%: Agent Log */}
+      <Panel title="Agent Reasoning Log" style={{ width: "40%", flexShrink: 0, padding: 0 }}>
+        <AgentLogPanel events={events} onOpenModal={() => setLogModalOpen(true)} />
+      </Panel>
+
+      {/* Modals */}
+      {logModalOpen && <AgentLogModal events={events} onClose={() => setLogModalOpen(false)} />}
+      {emailModal && <EmailModal email={emailModal} onClose={() => setEmailModal(null)} onSend={onEmailSend} />}
+      {configModal && <ConfigModal proposal={configModal} onClose={() => setConfigModal(null)} onAction={onConfigAction} />}
+    </div>
+  );
+}
+
+// ─── CONTRACT STACK TAB (mock — wire later) ───────────────────────────────────
+const layers = [
+  { id: 1, name: "Product Feature", color: "#f59e0b", health: 0.87, items: [{ name: "Same-day Activation", state: "active", risk: "low" }, { name: "Carrier Agg 3-Band", state: "active", risk: "medium" }, { name: "eSIM Provisioning", state: "piloting", risk: "low" }] },
+  { id: 2, name: "Capability", color: "#06b6d4", health: 0.92, items: [{ name: "Real-time Inventory Sync", state: "operational", risk: "low" }, { name: "Multi-carrier Radio Mgmt", state: "degraded", risk: "high" }, { name: "OTA Config Push", state: "operational", risk: "low" }] },
+  { id: 3, name: "Policy", color: "#8b5cf6", health: 0.78, items: [{ name: "SCell Activation v3", state: "active", risk: "medium" }, { name: "Reorder Policy", state: "active", risk: "low" }] },
+  { id: 4, name: "Managed Object", color: "#10b981", health: 0.95, items: [{ name: "CellDU.sCellConfig", state: "valid", risk: "low" }, { name: "dispatches row", state: "invalid", risk: "high" }] },
+  { id: 5, name: "Parameter", color: "#ef4444", health: 0.96, items: [{ name: "maxSCellCount = 2", state: "committed", risk: "low" }, { name: "ui_status = AT_PORT", state: "pending", risk: "medium" }] },
+];
+
+function HealthRing({ value, color, size = 36 }) {
+  const r = (size - 5) / 2, circ = 2 * Math.PI * r;
+  return (
+    <div style={{ position: "relative", width: size, height: size, flexShrink: 0 }}>
+      <svg width={size} height={size} style={{ transform: "rotate(-90deg)" }}>
+        <circle cx={size/2} cy={size/2} r={r} fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth={2.5} />
+        <circle cx={size/2} cy={size/2} r={r} fill="none" stroke={color} strokeWidth={2.5} strokeDasharray={circ} strokeDashoffset={circ * (1 - value)} strokeLinecap="round" />
+      </svg>
+      <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 9, fontWeight: 700, fontFamily: "monospace", color }}>{Math.round(value * 100)}</div>
+    </div>
+  );
+}
+
+function ContractStackTab() {
+  const [showLineage, setShowLineage] = useState(false);
+  const riskBadge = { low: { bg: "rgba(16,185,129,0.12)", fg: "#10b981" }, medium: { bg: "rgba(245,158,11,0.12)", fg: "#f59e0b" }, high: { bg: "rgba(239,68,68,0.12)", fg: "#ef4444" } };
+  const stateColor = { active: "#10b981", operational: "#10b981", valid: "#10b981", committed: "#10b981", piloting: "#06b6d4", pending: "#f59e0b", degraded: "#ef4444", invalid: "#ef4444" };
+  const lineageTrace = [{ layer: 5, msg: "maxSCellCount changed 2→0" }, { layer: 4, msg: "CellDU.sCellConfig flagged invalid" }, { layer: 3, msg: "SCell Activation v3 cannot be enforced" }, { layer: 2, msg: "Multi-carrier Radio Mgmt degraded" }, { layer: 1, msg: "Carrier Agg 3-Band at risk" }];
+  const conflicts = [
+    { sev: "critical", layers: "L1↔L3", title: "Cross-feature param collision", desc: "eSIM needs max_concurrent_syncs≥10. Carrier Agg needs ≤5.", time: "12m", mode: "quarantine" },
+    { sev: "warning", layers: "L3→L5", title: "Policy range violation", desc: "SCell Activation v3 requires maxSCellCount [1..4] but pending→0.", time: "34m", mode: "soft flag" },
+  ];
+  return (
+    <div style={{ display: "flex", height: "100%", gap: 12 }}>
+      <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 3, overflow: "auto" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+          <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: 1.5, textTransform: "uppercase", color: C.muted }}>Dependency Stack</span>
+          <button onClick={() => setShowLineage(!showLineage)} style={{ background: showLineage ? C.purple + "15" : "rgba(255,255,255,0.03)", border: `1px solid ${showLineage ? C.purple + "44" : C.border}`, color: showLineage ? "#a78bfa" : C.muted, borderRadius: 5, padding: "5px 12px", fontSize: 10, cursor: "pointer", fontFamily: "monospace" }}>{showLineage ? "Lineage Active" : "Show Lineage"}</button>
+        </div>
+        {layers.map(layer => (
+          <div key={layer.id} style={{ background: C.panel, border: `1px solid ${C.border}`, borderRadius: 8, padding: "10px 14px", borderLeft: `3px solid ${layer.color}` }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <HealthRing value={layer.health} color={layer.color} />
+              <div style={{ flex: 1 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
+                  <span style={{ fontSize: 9, fontWeight: 700, color: layer.color, fontFamily: "monospace", background: layer.color + "18", padding: "1px 5px", borderRadius: 3 }}>L{layer.id}</span>
+                  <span style={{ fontSize: 13, fontWeight: 600, color: C.text }}>{layer.name}</span>
+                </div>
+                <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+                  {layer.items.map((item, j) => (
+                    <span key={j} style={{ fontSize: 10, padding: "2px 6px", borderRadius: 3, background: riskBadge[item.risk].bg, color: riskBadge[item.risk].fg, fontFamily: "monospace" }}>
+                      <span style={{ display: "inline-block", width: 4, height: 4, borderRadius: "50%", background: stateColor[item.state], marginRight: 4, verticalAlign: "middle" }} />
+                      {item.name}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            </div>
+            {showLineage && lineageTrace.find(l => l.layer === layer.id) && (
+              <div style={{ marginTop: 8, padding: "6px 10px", borderRadius: 5, background: "rgba(139,92,246,0.06)", borderLeft: "2px solid #a78bfa", fontSize: 11, color: "#c4b5fd", fontFamily: "monospace" }}>
+                ↑ {lineageTrace.find(l => l.layer === layer.id).msg}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+      <div style={{ width: 320, display: "flex", flexDirection: "column", gap: 10, flexShrink: 0, overflow: "auto" }}>
+        <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: 1.5, textTransform: "uppercase", color: C.muted }}>Conflicts · {conflicts.length}</span>
+        {conflicts.map((c, i) => (
+          <div key={i} style={{ background: C.panel, border: `1px solid ${C.border}`, borderRadius: 8, padding: 12, borderLeft: `3px solid ${sevColor[c.sev]}` }}>
+            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
+              <span style={{ fontSize: 9, fontWeight: 700, padding: "1px 6px", borderRadius: 3, background: sevColor[c.sev] + "18", color: sevColor[c.sev], textTransform: "uppercase", fontFamily: "monospace" }}>{c.sev}</span>
+              <span style={{ fontSize: 9, color: C.muted, fontFamily: "monospace" }}>{c.time}</span>
+            </div>
+            <div style={{ fontSize: 12, fontWeight: 600, color: C.text, marginBottom: 3 }}>{c.title}</div>
+            <div style={{ fontSize: 11, color: C.muted, lineHeight: 1.4, marginBottom: 6 }}>{c.desc}</div>
+            <div style={{ display: "flex", justifyContent: "space-between" }}>
+              <span style={{ fontSize: 10, fontFamily: "monospace", color: C.purple }}>{c.layers}</span>
+              <span style={{ fontSize: 9, padding: "1px 6px", borderRadius: 3, background: "rgba(255,255,255,0.04)", color: C.muted, fontFamily: "monospace" }}>{c.mode}</span>
+            </div>
+          </div>
+        ))}
+        <div style={{ background: C.panel, border: `1px solid ${C.border}`, borderRadius: 8, padding: 12 }}>
+          <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: 1, textTransform: "uppercase", color: C.muted, marginBottom: 8 }}>Operational Chain</div>
+          {[{ n: "Checker", c: C.green, t: "rule-based" }, { n: "Reconciler", c: C.blue, t: "deterministic" }, { n: "Explainer", c: C.purple, t: "agent" }, { n: "Human Review", c: C.yellow, t: "approval" }].map((s, i) => (
+            <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 5 }}>
+              <div style={{ width: 22, height: 22, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 9, fontWeight: 700, fontFamily: "monospace", background: s.c + "15", color: s.c, border: `1px solid ${s.c}33` }}>{i+1}</div>
+              <span style={{ fontSize: 11, color: C.text, flex: 1 }}>{s.n}</span>
+              <span style={{ fontSize: 9, fontFamily: "monospace", color: s.c }}>{s.t}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── SECURITY TAB ─────────────────────────────────────────────────────────────
+const securityEvents = [
+  { ts: "14:32", sev: "critical", src: "gNMI", title: "Unauthorized config push attempt", detail: "IP 10.0.3.44 — invalid cert", status: "blocked" },
+  { ts: "14:18", sev: "high", src: "RADIUS", title: "Brute force auth pattern", detail: "847 failed auths from BRAS-02 in 5min", status: "investigating" },
+  { ts: "13:55", sev: "medium", src: "BGP", title: "Anomalous prefix announcement", detail: "AS 64512 advertising 10.0.0.0/8", status: "quarantined" },
+  { ts: "13:41", sev: "low", src: "TLS", title: "Certificate expiry in 14d", detail: "gNMI server cert on PE-01", status: "scheduled" },
+];
+
+function SecurityTab() {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 12, height: "100%", overflow: "auto" }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10 }}>
+        {[["CRITICAL", 1, "#ef4444"], ["HIGH", 2, "#f97316"], ["MEDIUM", 1, "#eab308"], ["LOW", 1, "#06b6d4"]].map(([l, n, c]) => (
+          <div key={l} style={{ background: C.panel, border: `1px solid ${C.border}`, borderRadius: 8, padding: "12px 14px", borderTop: `2px solid ${c}` }}>
+            <div style={{ fontSize: 9, letterSpacing: 1, color: C.muted, marginBottom: 4 }}>{l}</div>
+            <div style={{ fontSize: 24, fontWeight: 700, fontFamily: "monospace", color: c }}>{n}</div>
+          </div>
+        ))}
+      </div>
+      <Panel title="Security Events" style={{ flex: 1 }}>
+        {securityEvents.map((ev, i) => (
+          <div key={i} style={{ padding: "10px 0", borderBottom: `1px solid ${C.border}`, display: "grid", gridTemplateColumns: "44px 56px 1fr 80px", gap: 10, alignItems: "start" }}>
+            <span style={{ fontSize: 10, fontFamily: "monospace", color: C.muted }}>{ev.ts}</span>
+            <span style={{ fontSize: 9, fontWeight: 700, padding: "2px 6px", borderRadius: 3, textAlign: "center", background: sevColor[ev.sev] + "18", color: sevColor[ev.sev], textTransform: "uppercase", fontFamily: "monospace" }}>{ev.sev}</span>
+            <div>
+              <span style={{ fontSize: 9, padding: "1px 5px", borderRadius: 3, background: "rgba(255,255,255,0.04)", color: C.muted, marginRight: 6, fontFamily: "monospace" }}>{ev.src}</span>
+              <span style={{ fontSize: 12, fontWeight: 600, color: C.text }}>{ev.title}</span>
+              <div style={{ fontSize: 11, color: C.muted, marginTop: 2, lineHeight: 1.3 }}>{ev.detail}</div>
+            </div>
+            <span style={{ fontSize: 9, padding: "2px 6px", borderRadius: 3, textAlign: "center", fontFamily: "monospace", background: ev.status === "blocked" ? C.green + "12" : ev.status === "investigating" ? C.yellow + "12" : "rgba(255,255,255,0.04)", color: ev.status === "blocked" ? C.green : ev.status === "investigating" ? C.yellow : C.muted }}>{ev.status}</span>
+          </div>
+        ))}
+      </Panel>
+    </div>
+  );
+}
+
+// ─── CHURN TAB ────────────────────────────────────────────────────────────────
+const churnHistory = [{ m: "Nov", v: 4.1 }, { m: "Dec", v: 3.8 }, { m: "Jan", v: 3.5 }, { m: "Feb", v: 3.9 }, { m: "Mar", v: 3.2 }, { m: "Apr", v: 3.4 }];
+const churnForecast = [{ m: "May", v: 3.2, lo: 2.8, hi: 3.6 }, { m: "Jun", v: 3.5, lo: 2.9, hi: 4.1 }, { m: "Jul", v: 3.1, lo: 2.4, hi: 3.8 }, { m: "Aug", v: 2.8, lo: 2.0, hi: 3.6 }];
+
+function ChurnTab() {
+  const all = [...churnHistory.map(d => ({ m: d.m })), ...churnForecast.map(d => ({ m: d.m }))];
+  const W = 600, H = 180, pL = 35, pR = 15, pT = 15, pB = 25, pW = W-pL-pR, pH = H-pT-pB, mx = 5;
+  const x = i => pL + (i/(all.length-1))*pW;
+  const y = v => pT + pH - (v/mx)*pH;
+  const hPath = churnHistory.map((d,i) => `${i?'L':'M'}${x(i)},${y(d.v)}`).join('');
+  const fPath = churnForecast.map((d,i) => `${i?'L':'M'}${x(churnHistory.length+i)},${y(d.v)}`).join('');
+  const conn = `M${x(churnHistory.length-1)},${y(churnHistory[churnHistory.length-1].v)} L${x(churnHistory.length)},${y(churnForecast[0].v)}`;
+  const bandU = churnForecast.map((d,i) => `${x(churnHistory.length+i)},${y(d.hi)}`).join(' L');
+  const bandD = [...churnForecast].reverse().map((d,i) => `${x(churnHistory.length+churnForecast.length-1-i)},${y(d.lo)}`).join(' L');
+  const drivers = [{ d: "Network Quality < 70", pct: 34, seg: "Enterprise" }, { d: "Ticket Resolution > 48hrs", pct: 22, seg: "SMB" }, { d: "Price Sensitivity", pct: 18, seg: "Consumer" }, { d: "Feature Adoption Rate", pct: 14, seg: "All" }];
+  return (
+    <div style={{ display: "flex", height: "100%", gap: 12 }}>
+      <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 12, overflow: "auto" }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10 }}>
+          {[{ l: "Current Churn", v: "3.4%", ch: "+0.2%", bad: true }, { l: "Forecast Q3", v: "2.8%", ch: "−0.6%", bad: false }, { l: "At-Risk", v: "847", ch: "+12%", bad: true }].map((c, i) => (
+            <div key={i} style={{ background: C.panel, border: `1px solid ${C.border}`, borderRadius: 8, padding: "12px 14px" }}>
+              <div style={{ fontSize: 9, letterSpacing: 1, color: C.muted, marginBottom: 4 }}>{c.l}</div>
+              <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
+                <span style={{ fontSize: 22, fontWeight: 700, fontFamily: "monospace", color: C.text }}>{c.v}</span>
+                <span style={{ fontSize: 10, fontWeight: 600, fontFamily: "monospace", color: c.bad ? C.red : C.green }}>{c.ch}</span>
+              </div>
+            </div>
+          ))}
+        </div>
+        <Panel title="Churn Rate — Actual vs Forecast" style={{ flex: 1, minHeight: 220 }}>
+          <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", height: "auto" }}>
+            {[0,1,2,3,4,5].map(v => <g key={v}><line x1={pL} x2={W-pR} y1={y(v)} y2={y(v)} stroke="rgba(255,255,255,0.04)" /><text x={pL-6} y={y(v)+3} fill="#475569" fontSize={9} textAnchor="end" fontFamily="monospace">{v}%</text></g>)}
+            {all.map((d,i) => <text key={i} x={x(i)} y={H-4} fill="#475569" fontSize={8} textAnchor="middle" fontFamily="monospace">{d.m}</text>)}
+            <line x1={x(5.5)} x2={x(5.5)} y1={pT} y2={H-pB} stroke="rgba(255,255,255,0.1)" strokeDasharray="3,3" />
+            <path d={`M${bandU} L${bandD} Z`} fill="rgba(6,182,212,0.08)" />
+            <path d={hPath} fill="none" stroke={C.text} strokeWidth={2} />
+            <path d={conn} fill="none" stroke={C.blue} strokeWidth={1.5} strokeDasharray="4,3" />
+            <path d={fPath} fill="none" stroke={C.blue} strokeWidth={2} strokeDasharray="6,3" />
+            {churnHistory.map((d,i) => <circle key={i} cx={x(i)} cy={y(d.v)} r={2.5} fill={C.text} />)}
+            {churnForecast.map((d,i) => <circle key={i} cx={x(churnHistory.length+i)} cy={y(d.v)} r={2.5} fill={C.blue} />)}
+          </svg>
+        </Panel>
+      </div>
+      <div style={{ width: 280, display: "flex", flexDirection: "column", gap: 10, flexShrink: 0, overflow: "auto" }}>
+        <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: 1.5, textTransform: "uppercase", color: C.muted }}>Top Drivers</span>
+        {drivers.map((d, i) => (
+          <div key={i} style={{ background: C.panel, border: `1px solid ${C.border}`, borderRadius: 8, padding: 10 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
+              <span style={{ fontSize: 11, fontWeight: 600, color: C.text }}>{d.d}</span>
+              <span style={{ fontSize: 9, padding: "1px 5px", borderRadius: 3, background: "rgba(255,255,255,0.04)", color: C.muted, fontFamily: "monospace" }}>{d.seg}</span>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <div style={{ flex: 1, height: 5, background: "rgba(255,255,255,0.04)", borderRadius: 3, overflow: "hidden" }}>
+                <div style={{ width: `${d.pct*2.5}%`, height: "100%", background: d.pct > 25 ? C.red : d.pct > 15 ? C.yellow : C.blue, borderRadius: 3 }} />
+              </div>
+              <span style={{ fontSize: 11, fontWeight: 700, fontFamily: "monospace", color: C.text }}>{d.pct}%</span>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ─── TABS ─────────────────────────────────────────────────────────────────────
+const TABS = [
+  { key: "ops", label: "Operations", icon: "◉" },
+  { key: "contracts", label: "Contract Stack", icon: "◧" },
+  { key: "security", label: "Security", icon: "◈" },
+  { key: "churn", label: "Churn Forecast", icon: "◎" },
+];
+
+// ─── MAIN APP ─────────────────────────────────────────────────────────────────
+export default function App() {
+  const [state, setState] = useState({ nodes: {}, links: {}, lsps: {}, alarms: [] });
+  const [events, setEvents] = useState([]);
+  const [agentRunning, setAgentRunning] = useState(false);
+  const [wsStatus, setWsStatus] = useState("connecting");
+  const [activeTab, setActiveTab] = useState("ops");
+  const [logModalOpen, setLogModalOpen] = useState(false);
+  const [emailModal, setEmailModal] = useState(null);
+  const [configModal, setConfigModal] = useState(null);
+  const wsRef = useRef(null);
+
   const addEvent = useCallback((event) => {
     setEvents(prev => [...prev.slice(-500), event]);
     if (event.type === "state_update") setState(event.data);
   }, []);
 
+  // WebSocket
   useEffect(() => {
     const connect = () => {
       const ws = new WebSocket(WS_URL);
@@ -1015,6 +771,7 @@ export default function App() {
     return () => wsRef.current?.close();
   }, [addEvent]);
 
+  // Poll state
   useEffect(() => {
     const poll = async () => {
       try { const r = await fetch(`${API}/api/state`); setState(await r.json()); } catch {}
@@ -1035,21 +792,13 @@ export default function App() {
   });
 
   const handleAction = async (type, linkId, level) => {
-    const map = { failure: "/api/demo/inject-failure", congestion: "/api/demo/inject-congestion",
-                  restore: "/api/demo/restore-link", reset: "/api/demo/reset" };
-    const body = type === "congestion" ? { link_id: linkId, utilization: level }
-               : type === "reset" ? {} : { link_id: linkId };
+    const map = { failure: "/api/demo/inject-failure", congestion: "/api/demo/inject-congestion", restore: "/api/demo/restore-link", reset: "/api/demo/reset" };
+    const body = type === "congestion" ? { link_id: linkId, utilization: level } : type === "reset" ? {} : { link_id: linkId };
     try {
-      const r = await fetch(`${API}${map[type]}`, { method: "POST",
-        headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      const r = await fetch(`${API}${map[type]}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
       const result = await r.json();
-      setLastResult(result);
-      const repoll = async () => {
-        try { const sr = await fetch(`${API}/api/state`); setState(await sr.json()); } catch {}
-      };
-      setTimeout(repoll, 400);
-      setTimeout(repoll, 2000);
-    } catch (e) { setLastResult({ success: false, message: e.message }); }
+      setTimeout(async () => { try { const sr = await fetch(`${API}/api/state`); setState(await sr.json()); } catch {} }, 400);
+    } catch {}
   };
 
   const handleConfigAction = async (id, action, comment, changes) => {
@@ -1065,141 +814,45 @@ export default function App() {
     });
   };
 
-  const alarmCount = (state.alarms || []).length;
-
-  const Header = ({ mobile }) => (
-    <div style={{ height: mobile ? "44px" : "48px", flexShrink: 0, background: C.panel,
-      borderBottom: `1px solid ${C.border}`, padding: "0 14px",
-      display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-      <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-        <span style={{ fontSize: "18px" }}>⚡</span>
-        <span style={{ color: C.accent, fontWeight: "bold", fontSize: mobile ? "15px" : "16px" }}>ORCA</span>
-        {!mobile && <span style={{ color: C.muted, fontSize: "12px" }}>Autonomous Network Operations & Response Agent</span>}
-        {alarmCount > 0 && (
-          <span style={{ background: C.red + "33", border: `1px solid ${C.red}`, color: C.red,
-            borderRadius: "10px", padding: "1px 8px", fontSize: "11px", fontWeight: "bold" }}>
-            {alarmCount} alarm{alarmCount > 1 ? "s" : ""}
-          </span>
-        )}
-      </div>
-      <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-        <span style={{ fontSize: "11px", color: wsStatus === "connected" ? C.green : C.red }}>●</span>
-        {!mobile && (
-          <button onClick={analyzeBtn} style={{ background: C.blue + "22", border: `1px solid ${C.blue}`,
-            color: C.blue, padding: "5px 14px", borderRadius: "5px", cursor: "pointer",
-            fontSize: "12px", fontWeight: "bold" }}>🔍 Analyze</button>
-        )}
-        <button onClick={toggleAgent} style={{
-          background: agentRunning ? C.red + "22" : C.green + "22",
-          border: `1px solid ${agentRunning ? C.red : C.green}`,
-          color: agentRunning ? C.red : C.green, padding: "5px 12px",
-          borderRadius: "5px", cursor: "pointer", fontSize: "12px", fontWeight: "bold" }}>
-          {agentRunning ? (mobile ? "⏹ Stop" : "⏹ Stop Agent") : (mobile ? "▶ Start" : "▶ Start Agent")}
-        </button>
-      </div>
-    </div>
-  );
-
-  // Modals rendered at root level
-  const Modals = () => (
-    <>
-      {emailModal && <EmailModal email={emailModal} onClose={() => setEmailModal(null)} onSend={handleEmailSend} />}
-      {configModal && <ConfigModal proposal={configModal} onClose={() => setConfigModal(null)} onAction={handleConfigAction} />}
-    </>
-  );
-
-  if (!isMobile) {
-    return (
-      <div style={{ background: C.bg, height: "100vh", color: C.text,
-        fontFamily: "Arial, sans-serif", display: "flex", flexDirection: "column", overflow: "hidden" }}>
-        <Modals />
-        {logModalOpen && <AgentLogModal events={events} onClose={() => setLogModalOpen(false)} />}
-        <Header />
-        <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", padding: "12px", gap: "12px" }}>
-          {/* Top row */}
-          <div style={{ flex: "0 0 calc(50vh - 60px)", minHeight: 0, display: "flex", gap: "12px" }}>
-            <Panel title="Network Topology" style={{ flex: "1 1 0", minWidth: 0 }}>
-              <TopologyMap nodes={state.nodes} links={state.links} />
-            </Panel>
-            <div style={{ width: "270px", flexShrink: 0, display: "flex", flexDirection: "column", gap: "12px" }}>
-              <Panel title="Link Utilization" style={{ flex: "1 1 0", minHeight: 0 }}>
-                <UtilBars links={state.links} />
-              </Panel>
-              <Panel title={`Active Alarms${alarmCount > 0 ? ` (${alarmCount})` : ""}`}
-                style={{ flex: "0 0 auto", maxHeight: "145px" }}>
-                <Alarms alarms={state.alarms || []} />
-              </Panel>
-            </div>
-          </div>
-          {/* Fault controls */}
-          <Panel title="Demo Controls — Fault Injection" style={{ flex: "0 0 auto" }}>
-            <FaultPanel links={state.links} onAction={handleAction} lastResult={lastResult} />
-          </Panel>
-          {/* Bottom row */}
-          <div style={{ flex: "1 1 0", minHeight: 0, display: "flex", gap: "12px" }}>
-            <Panel title="Agent Reasoning Log" style={{ flex: "1 1 0", minHeight: 0 }}>
-              <AgentLog events={events} onOpenModal={() => setLogModalOpen(true)} />
-            </Panel>
-            <Panel title={`📋 Config Proposals${configBadge > 0 ? ` (${configBadge})` : ""}`}
-              style={{ flex: "0 0 320px", minHeight: 0 }}>
-              <ConfigPanel onOpenProposal={p => setConfigModal(p)} />
-            </Panel>
-            <Panel title="📧 Email Outbox" style={{ flex: "0 0 300px", minHeight: 0 }}>
-              <EmailInbox onOpenEmail={e => setEmailModal(e)} />
-            </Panel>
+  return (
+    <div style={{ height: "100vh", background: C.bg, color: C.text, fontFamily: "'DM Sans','Segoe UI',system-ui,sans-serif", display: "flex", flexDirection: "column", overflow: "hidden" }}>
+      {/* HEADER */}
+      <div style={{ padding: "10px 20px", borderBottom: `1px solid ${C.border}`, display: "flex", alignItems: "center", gap: 16, flexShrink: 0 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginRight: 8 }}>
+          <div style={{ width: 32, height: 32, borderRadius: 7, display: "flex", alignItems: "center", justifyContent: "center", background: "linear-gradient(135deg,#06b6d4,#8b5cf6)", fontSize: 16, fontWeight: 800, fontFamily: "monospace", color: "#fff" }}>O</div>
+          <div>
+            <div style={{ fontSize: 16, fontWeight: 700, letterSpacing: -0.5, color: "#f0f4f8" }}>ORCA</div>
+            <div style={{ fontSize: 9, letterSpacing: 1.5, textTransform: "uppercase", color: C.muted }}>Autonomous Ops & Response</div>
           </div>
         </div>
-      </div>
-    );
-  }
-
-  return (
-    <div style={{ background: C.bg, height: "100vh", color: C.text,
-      fontFamily: "Arial, sans-serif", display: "flex", flexDirection: "column", overflow: "hidden" }}>
-      <Modals />
-      {logModalOpen && <AgentLogModal events={events} onClose={() => setLogModalOpen(false)} />}
-      <Header mobile />
-      <TabBar active={tab} onChange={setTab} configBadge={configBadge} />
-      <div style={{ flex: 1, minHeight: 0, overflow: "hidden", padding: "10px" }}>
-        {tab === "Topology" && (
-          <div style={{ height: "100%", display: "flex", flexDirection: "column", gap: "10px" }}>
-            <Panel title="Network Topology" style={{ flex: "1 1 0", minHeight: 0 }}>
-              <TopologyMap nodes={state.nodes} links={state.links} />
-            </Panel>
-            <Panel title={`Active Alarms${alarmCount > 0 ? ` (${alarmCount})` : ""}`}
-              style={{ flex: "0 0 auto", maxHeight: "140px" }}>
-              <Alarms alarms={state.alarms || []} />
-            </Panel>
-          </div>
-        )}
-        {tab === "Utilization" && <Panel title="Link Utilization" style={{ height: "100%" }}><UtilBars links={state.links} /></Panel>}
-        {tab === "Controls" && (
-          <div style={{ height: "100%", display: "flex", flexDirection: "column", gap: "10px", overflowY: "auto" }}>
-            <Panel title="Demo Controls — Fault Injection">
-              <FaultPanel links={state.links} onAction={handleAction} lastResult={lastResult} />
-            </Panel>
-            <button onClick={() => { analyzeBtn(); setTab("Agent Log"); }} style={{
-              background: C.blue + "22", border: `2px solid ${C.blue}`, color: C.blue,
-              padding: "12px", borderRadius: "8px", cursor: "pointer", fontSize: "13px", fontWeight: "bold" }}>
-              🔍 Run Analysis Now
+        <div style={{ display: "flex", gap: 2, background: "rgba(255,255,255,0.02)", borderRadius: 8, padding: 3 }}>
+          {TABS.map(tab => (
+            <button key={tab.key} onClick={() => setActiveTab(tab.key)} style={{ padding: "7px 16px", borderRadius: 6, border: "none", background: activeTab === tab.key ? "rgba(6,182,212,0.12)" : "transparent", color: activeTab === tab.key ? C.blue : C.muted, fontSize: 12, fontWeight: 600, cursor: "pointer", transition: "all 0.15s", display: "flex", alignItems: "center", gap: 6 }}>
+              <span style={{ fontSize: 11 }}>{tab.icon}</span>{tab.label}
             </button>
-          </div>
+          ))}
+        </div>
+        <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 10 }}>
+          <div style={{ width: 7, height: 7, borderRadius: "50%", background: wsStatus === "connected" ? C.green : C.red, boxShadow: `0 0 6px ${wsStatus === "connected" ? C.green : C.red}55` }} />
+          <span style={{ fontSize: 10, color: C.muted, fontFamily: "monospace" }}>v26 · {window.location.hostname}</span>
+        </div>
+      </div>
+
+      {/* CONTENT */}
+      <div style={{ flex: 1, padding: 12, minHeight: 0, overflow: "hidden" }}>
+        {activeTab === "ops" && (
+          <OperationsTab
+            state={state} events={events} agentRunning={agentRunning} wsStatus={wsStatus}
+            onToggleAgent={toggleAgent} onAnalyze={analyzeBtn} onAction={handleAction}
+            onConfigAction={handleConfigAction} onEmailSend={handleEmailSend}
+            logModalOpen={logModalOpen} setLogModalOpen={setLogModalOpen}
+            emailModal={emailModal} setEmailModal={setEmailModal}
+            configModal={configModal} setConfigModal={setConfigModal}
+          />
         )}
-        {tab === "Agent Log" && (
-          <Panel title="Agent Reasoning Log" style={{ height: "100%" }}>
-            <AgentLog events={events} onOpenModal={() => setLogModalOpen(true)} />
-          </Panel>
-        )}
-        {tab === "Emails" && (
-          <Panel title="📧 Email Outbox" style={{ height: "100%" }}>
-            <EmailInbox onOpenEmail={e => setEmailModal(e)} />
-          </Panel>
-        )}
-        {tab === "Config" && (
-          <Panel title="📋 Config Proposals" style={{ height: "100%" }}>
-            <ConfigPanel onOpenProposal={p => setConfigModal(p)} />
-          </Panel>
-        )}
+        {activeTab === "contracts" && <ContractStackTab />}
+        {activeTab === "security" && <SecurityTab />}
+        {activeTab === "churn" && <ChurnTab />}
       </div>
     </div>
   );
