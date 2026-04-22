@@ -151,7 +151,16 @@ const logTypeStyle = {
 const LogEntry = memo(function LogEntry({ entry }) {
   const s = logTypeStyle[entry.type] || logTypeStyle.status;
   const msg = entry.message || entry.msg || JSON.stringify(entry.data || "");
-  const ts = entry.timestamp ? new Date(entry.timestamp * 1000).toLocaleTimeString() : "";
+  const ts = (() => {
+    if (!entry.timestamp) return "";
+    const t = entry.timestamp;
+    // Already a formatted string
+    if (typeof t === "string" && isNaN(Number(t))) return t;
+    // Unix epoch in seconds
+    const ms = Number(t) < 1e10 ? Number(t) * 1000 : Number(t);
+    const d = new Date(ms);
+    return isNaN(d.getTime()) ? "" : d.toLocaleTimeString();
+  })();
   return (
     <div style={{ padding: "8px 10px", marginBottom: 4, borderRadius: 6, background: s.bg, borderLeft: `2px solid ${s.color}` }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 3 }}>
