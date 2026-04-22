@@ -1,0 +1,20 @@
+# Episode 20260422-061041
+# Written by ORCA after action cycle
+timestamp: "2026-04-22T06:10:41.394919Z"
+trigger:
+  type: "link_failure"
+  link: "R1-R4"
+actions_taken:
+  - "rerouted lsp-customer-a from R1→R6→R5→R4 to R1→R2→R5→R4"
+  - "notified ops team of critical failure"
+  - "opened Nokia TAC case P1 for R1-R4 hardware failure"
+  - "proposed permanent IGP metric changes for topology optimization"
+  - "created Git PR #33 for config tracking"
+outcome:
+  result: "success"
+  mission_1_satisfied: true
+  mission_2_improvement_pct: 1.0
+  time_to_resolution_seconds: 45
+  human_override: false
+  override_reason: ""
+learned_constraint: "After link failures causing >80% utilization on alternate paths, consider multiple rerouting options and choose path that best balances overall network load"
