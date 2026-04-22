@@ -349,31 +349,71 @@ function EmailModal({ email, onClose, onSend }) {
   );
 }
 
-// ─── CONTROLS CARD ────────────────────────────────────────────────────────────
-function ControlsCard({ agentRunning, onToggleAgent, onAnalyze, onAction, wsStatus }) {
+// ─── CONTROLS SLIM BAR ────────────────────────────────────────────────────────
+function ControlsBar({ onAnalyze, onAction }) {
   const [link, setLink] = useState("R1-R4");
   const [level, setLevel] = useState(92);
   const links = ["R1-R2","R2-R3","R3-R4","R4-R5","R5-R6","R6-R1","R1-R4","R2-R5"];
+  return (
+    <div style={{ background: C.panel, border: `1px solid ${C.border}`, borderRadius: 7, padding: "7px 12px", display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
+      <span style={{ fontSize: 9, fontWeight: 700, color: C.muted, letterSpacing: 1, textTransform: "uppercase", flexShrink: 0 }}>Link</span>
+      <select value={link} onChange={e => setLink(e.target.value)} style={{ padding: "3px 6px", background: "rgba(255,255,255,0.04)", border: `1px solid ${C.border}`, borderRadius: 4, color: C.text, fontSize: 11 }}>
+        {links.map(l => <option key={l} value={l}>{l}</option>)}
+      </select>
+      <input type="range" min={50} max={99} value={level} onChange={e => setLevel(Number(e.target.value))} style={{ width: 80 }} />
+      <span style={{ fontSize: 10, color: C.muted, fontFamily: "monospace", width: 28, flexShrink: 0 }}>{level}%</span>
+      <div style={{ width: 1, height: 16, background: C.border, flexShrink: 0 }} />
+      <button onClick={() => onAction("failure", link)} style={{ padding: "4px 9px", borderRadius: 4, fontSize: 10, fontWeight: 600, cursor: "pointer", background: C.red + "18", border: `1px solid ${C.red}44`, color: C.red, flexShrink: 0 }}>Inject Fault</button>
+      <button onClick={() => onAction("congestion", link, level)} style={{ padding: "4px 9px", borderRadius: 4, fontSize: 10, fontWeight: 600, cursor: "pointer", background: C.orange + "18", border: `1px solid ${C.orange}44`, color: C.orange, flexShrink: 0 }}>Congest</button>
+      <button onClick={() => onAction("restore", link)} style={{ padding: "4px 9px", borderRadius: 4, fontSize: 10, fontWeight: 600, cursor: "pointer", background: C.green + "18", border: `1px solid ${C.green}44`, color: C.green, flexShrink: 0 }}>Restore</button>
+      <button onClick={() => onAction("reset")} style={{ padding: "4px 9px", borderRadius: 4, fontSize: 10, fontWeight: 600, cursor: "pointer", background: "rgba(255,255,255,0.04)", border: `1px solid ${C.border}`, color: C.muted, flexShrink: 0 }}>Reset</button>
+      <button onClick={onAnalyze} style={{ padding: "4px 9px", borderRadius: 4, fontSize: 10, fontWeight: 600, cursor: "pointer", background: C.blue + "18", border: `1px solid ${C.blue}44`, color: C.blue, flexShrink: 0, marginLeft: "auto" }}>🔍 Analyze</button>
+    </div>
+  );
+}
+
+// ─── LINK UTILIZATION TABLE ───────────────────────────────────────────────────
+function LinkUtilPanel({ links }) {
+  const rows = Object.entries(links || {}).map(([id, l]) => ({
+    id, src: l.src_node || l.src || "—", dst: l.dst_node || l.dst || "—",
+    util: l.utilization_pct || 0, state: l.state || "up",
+    cap: l.capacity_gbps || "—",
+  })).sort((a, b) => b.util - a.util);
 
   return (
-    <div style={{ background: C.panel, border: `1px solid ${C.border}`, borderRadius: 8, padding: 10 }}>
-      <div style={{ fontSize: 10, fontWeight: 700, color: C.muted, letterSpacing: 1, textTransform: "uppercase", marginBottom: 8 }}>Controls</div>
-      <div style={{ marginBottom: 8 }}>
-        <select value={link} onChange={e => setLink(e.target.value)} style={{ width: "100%", padding: "4px 6px", background: "rgba(255,255,255,0.04)", border: `1px solid ${C.border}`, borderRadius: 4, color: C.text, fontSize: 11, marginBottom: 6 }}>
-          {links.map(l => <option key={l} value={l}>{l}</option>)}
-        </select>
-        <div style={{ display: "flex", gap: 4 }}>
-          <input type="range" min={50} max={99} value={level} onChange={e => setLevel(Number(e.target.value))} style={{ flex: 1 }} />
-          <span style={{ fontSize: 10, color: C.muted, fontFamily: "monospace", width: 30 }}>{level}%</span>
-        </div>
-      </div>
-      <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
-        <button onClick={() => onAction("failure", link)} style={{ padding: "5px 9px", borderRadius: 5, fontSize: 10, fontWeight: 600, cursor: "pointer", background: C.red + "18", border: `1px solid ${C.red}44`, color: C.red }}>Inject Fault</button>
-        <button onClick={() => onAction("congestion", link, level)} style={{ padding: "5px 9px", borderRadius: 5, fontSize: 10, fontWeight: 600, cursor: "pointer", background: C.orange + "18", border: `1px solid ${C.orange}44`, color: C.orange }}>Congest</button>
-        <button onClick={() => onAction("restore", link)} style={{ padding: "5px 9px", borderRadius: 5, fontSize: 10, fontWeight: 600, cursor: "pointer", background: C.green + "18", border: `1px solid ${C.green}44`, color: C.green }}>Restore</button>
-        <button onClick={() => onAction("reset")} style={{ padding: "5px 9px", borderRadius: 5, fontSize: 10, fontWeight: 600, cursor: "pointer", background: "rgba(255,255,255,0.04)", border: `1px solid ${C.border}`, color: C.muted }}>Reset</button>
-        <button onClick={onAnalyze} style={{ padding: "5px 9px", borderRadius: 5, fontSize: 10, fontWeight: 600, cursor: "pointer", background: C.blue + "18", border: `1px solid ${C.blue}44`, color: C.blue }}>🔍 Analyze</button>
-      </div>
+    <div style={{ height: "100%", overflow: "auto" }}>
+      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
+        <thead>
+          <tr style={{ borderBottom: `1px solid ${C.border}` }}>
+            {["Link", "Src", "Dst", "Util", "Cap", "State"].map(h => (
+              <th key={h} style={{ padding: "5px 8px", textAlign: "left", fontSize: 9, fontWeight: 700, color: C.muted, letterSpacing: 0.5, textTransform: "uppercase", fontFamily: "monospace" }}>{h}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.length === 0 ? (
+            <tr><td colSpan={6} style={{ padding: "12px 8px", textAlign: "center", color: C.muted, fontSize: 11 }}>No link data</td></tr>
+          ) : rows.map((r, i) => (
+            <tr key={r.id} style={{ borderBottom: `1px solid ${C.border}22` }}>
+              <td style={{ padding: "6px 8px", fontFamily: "monospace", fontSize: 10, color: C.muted }}>{r.id}</td>
+              <td style={{ padding: "6px 8px", fontFamily: "monospace", fontSize: 10, color: C.text }}>{r.src}</td>
+              <td style={{ padding: "6px 8px", fontFamily: "monospace", fontSize: 10, color: C.text }}>{r.dst}</td>
+              <td style={{ padding: "6px 8px" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  <div style={{ width: 48, height: 4, background: "rgba(255,255,255,0.06)", borderRadius: 2, overflow: "hidden" }}>
+                    <div style={{ width: `${Math.min(r.util, 100)}%`, height: "100%", background: utilColor(r.util), borderRadius: 2 }} />
+                  </div>
+                  <span style={{ fontSize: 11, fontWeight: 700, fontFamily: "monospace", color: utilColor(r.util), minWidth: 34 }}>{r.state === "down" ? "—" : `${r.util.toFixed(0)}%`}</span>
+                </div>
+              </td>
+              <td style={{ padding: "6px 8px", fontFamily: "monospace", fontSize: 10, color: C.muted }}>{r.cap !== "—" ? `${r.cap}G` : "—"}</td>
+              <td style={{ padding: "6px 8px" }}>
+                <span style={{ fontSize: 9, padding: "1px 5px", borderRadius: 3, fontFamily: "monospace", fontWeight: 700, background: r.state === "down" ? C.red + "18" : C.green + "12", color: r.state === "down" ? C.red : C.green }}>{r.state}</span>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }
@@ -425,21 +465,19 @@ function OperationsTab({ state, events, agentRunning, wsStatus, onToggleAgent, o
     <div style={{ display: "flex", height: "100%", gap: 12 }}>
       {/* LEFT 60% */}
       <div style={{ width: "60%", display: "flex", flexDirection: "column", gap: 12, minHeight: 0 }}>
-        {/* TOP: Topology + Controls */}
-        <div style={{ height: "40%", display: "flex", gap: 12, flexShrink: 0 }}>
+        {/* TOP: Topology + Alarms sidebar */}
+        <div style={{ height: "38%", display: "flex", gap: 12, flexShrink: 0 }}>
           <Panel title="Network Topology" style={{ flex: 1 }}>
             <TopologyMap nodes={state.nodes || {}} links={state.links || {}} />
           </Panel>
-          <div style={{ width: 220, display: "flex", flexDirection: "column", gap: 8, flexShrink: 0 }}>
-            {/* Agent status */}
-            <div style={{ background: C.panel, border: `1px solid ${C.border}`, borderRadius: 8, padding: "10px 12px", display: "flex", alignItems: "center", gap: 8 }}>
+          <div style={{ width: 210, display: "flex", flexDirection: "column", gap: 8, flexShrink: 0 }}>
+            <div style={{ background: C.panel, border: `1px solid ${C.border}`, borderRadius: 8, padding: "9px 12px", display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
               <div style={{ width: 8, height: 8, borderRadius: "50%", background: wsStatus === "connected" ? C.green : C.red, boxShadow: `0 0 8px ${wsStatus === "connected" ? C.green : C.red}55` }} />
               <span style={{ fontSize: 11, color: C.text, fontWeight: 600 }}>{agentRunning ? "Agent Running" : "Agent Stopped"}</span>
-              <button onClick={onToggleAgent} style={{ marginLeft: "auto", padding: "4px 10px", borderRadius: 5, fontSize: 10, fontWeight: 700, background: agentRunning ? C.red + "18" : C.green + "18", border: `1px solid ${agentRunning ? C.red + "44" : C.green + "44"}`, color: agentRunning ? C.red : C.green, cursor: "pointer" }}>
+              <button onClick={onToggleAgent} style={{ marginLeft: "auto", padding: "3px 9px", borderRadius: 5, fontSize: 10, fontWeight: 700, background: agentRunning ? C.red + "18" : C.green + "18", border: `1px solid ${agentRunning ? C.red + "44" : C.green + "44"}`, color: agentRunning ? C.red : C.green, cursor: "pointer" }}>
                 {agentRunning ? "⏹ Stop" : "▶ Start"}
               </button>
             </div>
-            {/* Alarms */}
             <Panel title="Alarms" badge={alarms.filter(a => a.severity === "critical").length} style={{ flex: 1 }}>
               {alarms.length === 0 ? (
                 <div style={{ fontSize: 11, color: C.muted, textAlign: "center", paddingTop: 8 }}>No active alarms</div>
@@ -450,10 +488,10 @@ function OperationsTab({ state, events, agentRunning, wsStatus, onToggleAgent, o
                 </div>
               ))}
             </Panel>
-            {/* Controls */}
-            <ControlsCard agentRunning={agentRunning} onToggleAgent={onToggleAgent} onAnalyze={onAnalyze} onAction={onAction} wsStatus={wsStatus} />
           </div>
         </div>
+        {/* CONTROLS SLIM BAR */}
+        <ControlsBar onAnalyze={onAnalyze} onAction={onAction} />
 
         {/* BOTTOM: Config + Notifications + Emails */}
         <div style={{ flex: 1, display: "flex", gap: 12, minHeight: 0 }}>
@@ -491,17 +529,10 @@ function OperationsTab({ state, events, agentRunning, wsStatus, onToggleAgent, o
             ))}
           </Panel>
 
-          {/* Notifications + Emails */}
+          {/* Link Utilization + Emails */}
           <div style={{ width: "45%", display: "flex", flexDirection: "column", gap: 12, minHeight: 0 }}>
-            <Panel title="Notifications" style={{ flex: 1 }}>
-              {notifications.length === 0 ? (
-                <div style={{ fontSize: 11, color: C.muted, textAlign: "center", paddingTop: 8 }}>No notifications</div>
-              ) : notifications.map((n, i) => (
-                <div key={i} style={{ padding: "8px 0", borderBottom: `1px solid ${C.border}`, display: "flex", flexDirection: "column", gap: 4 }}>
-                  <span style={{ fontSize: 11, fontWeight: 600, color: n.type === "pr_opened" ? C.purple : C.blue, fontFamily: "monospace" }}>{n.type === "pr_opened" ? "GitHub PR" : "Notification"}</span>
-                  <div style={{ fontSize: 11, color: C.text, lineHeight: 1.4 }}>{n.msg}</div>
-                </div>
-              ))}
+            <Panel title="Link Utilization" style={{ flex: 1 }}>
+              <LinkUtilPanel links={state.links || {}} />
             </Panel>
             <Panel title="📧 Email Outbox" badge={emails.length} style={{ flex: 1 }}>
               {emails.length === 0 ? (
