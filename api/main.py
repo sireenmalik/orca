@@ -264,10 +264,12 @@ async def approve_proposal(proposal_id: str, body: ProposalAction = ProposalActi
         diff_files   = [f"config_mgmt/diff/nokia-lab-sfo2/{r}.diff" for r in routers]
         all_files = config_files + diff_files
 
+        commit_title = proposal.get("title", "ORCA config update")
+        routers_str = ",".join(routers)
         git_cmds = [
             f"git checkout -b {branch}",
             "git add " + " ".join(all_files),
-            f'git commit -m "cfg({",".join(routers)}): {proposal.get(\"title\", \"ORCA config update\")}"',
+            f'git commit -m "cfg({routers_str}): {commit_title}"',
             f"git push origin {branch}",
         ]
         for cmd in git_cmds:
