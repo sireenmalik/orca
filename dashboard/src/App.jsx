@@ -497,12 +497,8 @@ function OperationsTab({ state, events, agentRunning, wsStatus, onToggleAgent, o
         {/* CONTROLS SLIM BAR */}
         <ControlsBar onAnalyze={onAnalyze} onAction={onAction} />
 
-        {/* BOTTOM: Util + Config + Alarms/Emails */}
+        {/* BOTTOM: Config + Alarms/Emails */}
         <div style={{ flex: 1, display: "flex", gap: 12, minHeight: 0 }}>
-          {/* Link Utilization - full height left panel */}
-          <Panel title="Link Utilization" style={{ width: 280, flexShrink: 0 }}>
-            <LinkUtilPanel links={state.links || {}} />
-          </Panel>
           {/* Config Proposals */}
           <Panel title="Config Proposals" badge={pendingProposals} style={{ flex: 1 }}>
             {proposals.length === 0 ? (
