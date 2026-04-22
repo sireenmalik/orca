@@ -990,16 +990,77 @@ function ChurnTab({ events }) {
 
         {/* Churn trend chart */}
         <Panel title="Churn Rate — Actual vs Forecast" style={{ flex: 1, minHeight: 200 }}>
+          {/* Legend */}
+          <div style={{ display: "flex", gap: 16, marginBottom: 8, flexWrap: "wrap" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+              <svg width={24} height={8}><line x1={0} y1={4} x2={24} y2={4} stroke={C.text} strokeWidth={2}/></svg>
+              <span style={{ fontSize: 10, color: C.muted }}>Actual churn rate</span>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+              <svg width={24} height={8}><line x1={0} y1={4} x2={24} y2={4} stroke={C.blue} strokeWidth={2} strokeDasharray="5,3"/></svg>
+              <span style={{ fontSize: 10, color: C.muted }}>Forecast (with ORCA)</span>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+              <svg width={24} height={8}><line x1={0} y1={4} x2={24} y2={4} stroke={C.red} strokeWidth={1.5} strokeDasharray="3,2"/></svg>
+              <span style={{ fontSize: 10, color: C.muted }}>Forecast (without ORCA)</span>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+              <svg width={10} height={10}><polygon points="5,0 10,10 0,10" fill={C.yellow}/></svg>
+              <span style={{ fontSize: 10, color: C.muted }}>Network incident — ORCA resolved</span>
+            </div>
+          </div>
           <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", height: "auto" }}>
-            {[0,1,2,3,4,5].map(v => <g key={v}><line x1={pL} x2={W-pR} y1={y(v)} y2={y(v)} stroke="rgba(255,255,255,0.04)" /><text x={pL-6} y={y(v)+3} fill="#475569" fontSize={9} textAnchor="end" fontFamily="monospace">{v}%</text></g>)}
+            {/* Grid */}
+            {[0,1,2,3,4,5].map(v => <g key={v}>
+              <line x1={pL} x2={W-pR} y1={y(v)} y2={y(v)} stroke="rgba(255,255,255,0.04)" />
+              <text x={pL-6} y={y(v)+3} fill="#475569" fontSize={9} textAnchor="end" fontFamily="monospace">{v}%</text>
+            </g>)}
             {all.map((d,i) => <text key={i} x={x(i)} y={H-4} fill="#475569" fontSize={8} textAnchor="middle" fontFamily="monospace">{d.m}</text>)}
+
+            {/* Today divider */}
             <line x1={x(5.5)} x2={x(5.5)} y1={pT} y2={H-pB} stroke="rgba(255,255,255,0.1)" strokeDasharray="3,3" />
-            <path d={`M${bandU} L${bandD} Z`} fill="rgba(6,182,212,0.08)" />
+            <text x={x(5.5)+3} y={pT+8} fill="#475569" fontSize={8} fontFamily="monospace">today</text>
+
+            {/* Confidence band — with ORCA */}
+            <path d={`M${bandU} L${bandD} Z`} fill="rgba(6,182,212,0.07)" />
+
+            {/* Counterfactual band — without ORCA (wider, higher, red tint) */}
+            <path d={`M${x(5.5)},${y(3.4)} L${x(6)},${y(3.9)} L${x(7)},${y(4.3)} L${x(8)},${y(4.6)} L${x(9)},${y(4.8)} L${x(9)},${y(3.8)} L${x(8)},${y(3.5)} L${x(7)},${y(3.2)} L${x(6)},${y(3.0)} Z`} fill="rgba(239,68,68,0.07)" />
+
+            {/* Actual line */}
             <path d={hPath} fill="none" stroke={C.text} strokeWidth={2} />
             <path d={conn} fill="none" stroke={C.blue} strokeWidth={1.5} strokeDasharray="4,3" />
+
+            {/* Forecast with ORCA */}
             <path d={fPath} fill="none" stroke={C.blue} strokeWidth={2} strokeDasharray="6,3" />
+
+            {/* Forecast WITHOUT ORCA — diverges upward */}
+            <path d={`M${x(5.5)},${y(3.4)} L${x(6)},${y(3.85)} L${x(7)},${y(4.2)} L${x(8)},${y(4.45)} L${x(9)},${y(4.6)}`} fill="none" stroke={C.red} strokeWidth={1.5} strokeDasharray="3,2" opacity={0.7} />
+
+            {/* Data points */}
             {churnHistory.map((d,i) => <circle key={i} cx={x(i)} cy={y(d.v)} r={2.5} fill={C.text} />)}
             {churnForecast.map((d,i) => <circle key={i} cx={x(churnHistory.length+i)} cy={y(d.v)} r={2.5} fill={C.blue} />)}
+
+            {/* ── INCIDENT ANNOTATIONS ── */}
+
+            {/* Incident 1: Feb congestion — ORCA resolved */}
+            <line x1={x(3)} x2={x(3)} y1={y(3.9)+2} y2={y(3.9)+18} stroke={C.yellow} strokeWidth={1} strokeDasharray="2,2" />
+            <polygon points={`${x(3)},${y(3.9)-6} ${x(3)+5},${y(3.9)+4} ${x(3)-5},${y(3.9)+4}`} fill={C.yellow} opacity={0.9} />
+            <rect x={x(3)-28} y={y(3.9)-28} width={56} height={18} rx={3} fill="rgba(234,179,8,0.12)" stroke={C.yellow + "44"} />
+            <text x={x(3)} y={y(3.9)-16} fill={C.yellow} fontSize={8} textAnchor="middle" fontFamily="monospace">R2-R5 congestion</text>
+            <text x={x(3)} y={y(3.9)-7} fill={C.yellow} fontSize={7} textAnchor="middle" fontFamily="monospace">ORCA: 23s</text>
+
+            {/* Incident 2: Apr R1-R4 failure — today, ORCA resolved */}
+            <line x1={x(5)} x2={x(5)} y1={y(3.4)+2} y2={y(3.4)+18} stroke={C.red} strokeWidth={1} strokeDasharray="2,2" />
+            <polygon points={`${x(5)},${y(3.4)-6} ${x(5)+5},${y(3.4)+4} ${x(5)-5},${y(3.4)+4}`} fill={C.red} opacity={0.9} />
+            <rect x={x(5)-32} y={y(3.4)-28} width={64} height={18} rx={3} fill="rgba(239,68,68,0.12)" stroke={C.red + "44"} />
+            <text x={x(5)} y={y(3.4)-16} fill={C.red} fontSize={8} textAnchor="middle" fontFamily="monospace">R1-R4 DOWN</text>
+            <text x={x(5)} y={y(3.4)-7} fill={C.green} fontSize={7} textAnchor="middle" fontFamily="monospace">ORCA: 47s ✓</text>
+
+            {/* Gap annotation between with/without ORCA */}
+            <line x1={x(8)} x2={x(8)} y1={y(4.45)} y2={y(3.1)} stroke="rgba(255,255,255,0.15)" strokeWidth={1} strokeDasharray="2,2" />
+            <text x={x(8)+4} y={y(3.8)} fill={C.red} fontSize={8} fontFamily="monospace" opacity={0.8}>+1.35%</text>
+            <text x={x(8)+4} y={y(3.8)+10} fill={C.red} fontSize={7} fontFamily="monospace" opacity={0.7}>without ORCA</text>
           </svg>
         </Panel>
       </div>
