@@ -1,0 +1,19 @@
+# ORCA Config Proposal — R1
+# Generated: 2026-04-23T12:01:38.987866Z
+# Incident: R1-R4 link failure requires permanent topology optimization. Current rerouted traffic via R1→R6→R5→R4 should be made the preferred path by adjusting IGP metrics to balance load and prevent future congestion when R1-R4 is restored.
+# Branch: cfg/R1-20260423-120138
+
+configure router isis 0
+    interface "unknown"
+-       metric ?
++       metric ?
+    exit
+    interface "unknown"
+-       metric ?
++       metric ?
+    exit
+    interface "unknown"
+-       metric ?
++       metric ?
+    exit
+exit
