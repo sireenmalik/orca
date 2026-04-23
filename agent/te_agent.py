@@ -3,6 +3,7 @@ ORCA — Autonomous Network Operations & Response Agent
 Core reasoning loop powered by Claude Sonnet 4
 """
 import asyncio, json, os, time
+from datetime import datetime
 from typing import Optional, Callable
 import anthropic
 from agent.adapter import ContainerlabAdapter, NetworkAdapter
@@ -118,7 +119,7 @@ async def _write_episode(inputs: dict) -> dict:
     changes = inputs.get("changes", [])
     diff_by_router = {}
     for ch in changes:
-        node = ch.get("node", ch.get("router", "unknown"))
+        node = ch.get("device", ch.get("node", ch.get("router", "unknown")))
         if node not in diff_by_router:
             diff_by_router[node] = []
         diff_by_router[node].append(
