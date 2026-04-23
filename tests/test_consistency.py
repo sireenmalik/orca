@@ -11,27 +11,27 @@ from agent.cspf import cspf, verify_mission_1, verify_mission_2
 
 # Topology matching nokia-lab-sfo2.yaml
 TOPOLOGY = {
-    "nodes": {n: {"id": n, "state": "up"} for n in ["R1","R2","R3","R4","R5","R6"]},
+    "nodes": {n: {"id": n, "state": "up"} for n in ["PE-01","P-02","PE-03","PE-04","P-01","PE-02"]},
     "links": {
-        "R1-R2": {"src":"R1","dst":"R2","state":"up","utilization_pct":45.0,"capacity_gbps":10,"igp_metric":10},
-        "R2-R3": {"src":"R2","dst":"R3","state":"up","utilization_pct":52.0,"capacity_gbps":10,"igp_metric":10},
-        "R3-R4": {"src":"R3","dst":"R4","state":"up","utilization_pct":48.0,"capacity_gbps":10,"igp_metric":10},
-        "R4-R5": {"src":"R4","dst":"R5","state":"up","utilization_pct":38.0,"capacity_gbps":10,"igp_metric":10},
-        "R5-R6": {"src":"R5","dst":"R6","state":"up","utilization_pct":42.0,"capacity_gbps":10,"igp_metric":10},
-        "R6-R1": {"src":"R6","dst":"R1","state":"up","utilization_pct":35.0,"capacity_gbps":10,"igp_metric":10},
-        "R1-R4": {"src":"R1","dst":"R4","state":"up","utilization_pct":28.0,"capacity_gbps":10,"igp_metric":10},
-        "R2-R5": {"src":"R2","dst":"R5","state":"up","utilization_pct":31.0,"capacity_gbps":10,"igp_metric":10},
+        "PE-01-P-02": {"src":"PE-01","dst":"P-02","state":"up","utilization_pct":45.0,"capacity_gbps":10,"igp_metric":10},
+        "P-02-PE-03": {"src":"P-02","dst":"PE-03","state":"up","utilization_pct":52.0,"capacity_gbps":10,"igp_metric":10},
+        "PE-03-PE-04": {"src":"PE-03","dst":"PE-04","state":"up","utilization_pct":48.0,"capacity_gbps":10,"igp_metric":10},
+        "PE-04-P-01": {"src":"PE-04","dst":"P-01","state":"up","utilization_pct":38.0,"capacity_gbps":10,"igp_metric":10},
+        "P-01-PE-02": {"src":"P-01","dst":"PE-02","state":"up","utilization_pct":42.0,"capacity_gbps":10,"igp_metric":10},
+        "PE-02-PE-01": {"src":"PE-02","dst":"PE-01","state":"up","utilization_pct":35.0,"capacity_gbps":10,"igp_metric":10},
+        "PE-01-PE-04": {"src":"PE-01","dst":"PE-04","state":"up","utilization_pct":28.0,"capacity_gbps":10,"igp_metric":10},
+        "P-02-P-01": {"src":"P-02","dst":"P-01","state":"up","utilization_pct":31.0,"capacity_gbps":10,"igp_metric":10},
     }
 }
 
 # LSP definitions matching nokia-lab-sfo2-lsps.yaml
 LSPS = {
-    "lsp-customer-a": {"src": "R1", "dst": "R4", "bandwidth_gbps": 2.0,
-                       "primary_path": ["R1","R2","R3","R4"]},
-    "lsp-customer-b": {"src": "R2", "dst": "R6", "bandwidth_gbps": 1.5,
-                       "primary_path": ["R2","R3","R4","R5","R6"]},
-    "lsp-mgmt":       {"src": "R1", "dst": "R6", "bandwidth_gbps": 0.5,
-                       "primary_path": ["R1","R6"]},
+    "lsp-customer-a": {"src": "PE-01", "dst": "PE-04", "bandwidth_gbps": 2.0,
+                       "primary_path": ["PE-01","P-02","PE-03","PE-04"]},
+    "lsp-customer-b": {"src": "P-02", "dst": "PE-02", "bandwidth_gbps": 1.5,
+                       "primary_path": ["P-02","PE-03","PE-04","P-01","PE-02"]},
+    "lsp-mgmt":       {"src": "PE-01", "dst": "PE-02", "bandwidth_gbps": 0.5,
+                       "primary_path": ["PE-01","PE-02"]},
 }
 
 
@@ -82,50 +82,50 @@ def _loopback_to_node(ip):
     return f"R{parts[3]}" if len(parts) == 4 else None
 
 def test_r1_lsp_customer_a_hops_match_spec():
-    """R1 candidate config LSP hops must match the LSP spec primary path."""
+    """PE-01 candidate config LSP hops must match the LSP spec primary path."""
     try:
-        with open("config_mgmt/candidate/nokia-lab-sfo2/R1.conf") as f:
+        with open("config_mgmt/candidate/nokia-lab-sfo2/PE-01.conf") as f:
             content = f.read()
     except FileNotFoundError:
-        pytest.skip("R1 candidate config not found")
+        pytest.skip("PE-01 candidate config not found")
 
     hops = _extract_hop_loopbacks(content)
     hop_nodes = [_loopback_to_node(h) for h in hops if _loopback_to_node(h)]
 
     spec_path = LSPS["lsp-customer-a"]["primary_path"]
     # Hops in config don't include the source node
-    expected_hops = spec_path[1:]  # R2, R3, R4
+    expected_hops = spec_path[1:]  # P-02, PE-03, PE-04
 
     assert hop_nodes == expected_hops, \
-        f"R1 lsp-customer-a hops {hop_nodes} don't match spec {expected_hops}"
+        f"PE-01 lsp-customer-a hops {hop_nodes} don't match spec {expected_hops}"
 
 def test_failure_scenario_r1r4_has_alternate_path():
     """
-    When R1-R4 fails, CSPF must find an alternate path for lsp-customer-a.
+    When PE-01-PE-04 fails, CSPF must find an alternate path for lsp-customer-a.
     This validates the failure scenario pre-computation in skills/future/.
     """
-    # Remove R1-R4 link
+    # Remove PE-01-PE-04 link
     failed_topo = {**TOPOLOGY, "links": {
-        k: ({**v, "state": "down"} if k == "R1-R4" else v)
+        k: ({**v, "state": "down"} if k == "PE-01-PE-04" else v)
         for k, v in TOPOLOGY["links"].items()
     }}
-    path = cspf(failed_topo, "R1", "R4", bandwidth_gbps=2.0)
+    path = cspf(failed_topo, "PE-01", "PE-04", bandwidth_gbps=2.0)
     assert path is not None, \
-        "No alternate path for lsp-customer-a when R1-R4 fails — Mission 1 at risk"
-    assert "R1-R4" not in [f"{path[i]}-{path[i+1]}" for i in range(len(path)-1)], \
+        "No alternate path for lsp-customer-a when PE-01-PE-04 fails — Mission 1 at risk"
+    assert "PE-01-PE-04" not in [f"{path[i]}-{path[i+1]}" for i in range(len(path)-1)], \
         "CSPF returned failed link in alternate path"
     assert verify_mission_1(path, failed_topo), \
-        "Alternate path violates Mission 1 after R1-R4 failure"
+        "Alternate path violates Mission 1 after PE-01-PE-04 failure"
 
 def test_failure_scenario_r2r3_has_alternate_path():
-    """When R2-R3 fails, CSPF must find alternate for lsp-customer-b."""
+    """When P-02-PE-03 fails, CSPF must find alternate for lsp-customer-b."""
     failed_topo = {**TOPOLOGY, "links": {
-        k: ({**v, "state": "down"} if k == "R2-R3" else v)
+        k: ({**v, "state": "down"} if k == "P-02-PE-03" else v)
         for k, v in TOPOLOGY["links"].items()
     }}
-    path = cspf(failed_topo, "R2", "R6", bandwidth_gbps=1.5)
+    path = cspf(failed_topo, "P-02", "PE-02", bandwidth_gbps=1.5)
     assert path is not None, \
-        "No alternate path for lsp-customer-b when R2-R3 fails"
+        "No alternate path for lsp-customer-b when P-02-PE-03 fails"
 
 if __name__ == "__main__":
     for name, fn in list(globals().items()):

@@ -15,18 +15,18 @@ lsps:
     name: "Customer-A Primary"
     customer: "Customer A"
     sla_tier: "platinum"
-    src: R1
-    dst: R4
+    src: PE-01
+    dst: PE-04
     bandwidth_gbps: 2.0
     priority: 1                     # highest — never preempted
     
     primary_path:
-      explicit: ["R1","R2","R3","R4"]
+      explicit: ["PE-01","P-02","PE-03","PE-04"]
       igp_metric_sum: 30
       
     protection:
       type: "facility"              # facility | path | none
-      backup_path: ["R1","R4"]      # direct cross-link
+      backup_path: ["PE-01","PE-04"]      # direct cross-link
       
     constraints:
       avoid_links: []               # operator-defined exclusions
@@ -37,25 +37,25 @@ lsps:
       notify_on_reroute: true
       approval_required: false      # ORCA can act without human approval
       preferred_reroute_paths:
-        - ["R1","R6","R5","R4"]
-        - ["R1","R4"]
+        - ["PE-01","PE-02","P-01","PE-04"]
+        - ["PE-01","PE-04"]
 
   lsp-customer-b:
     name: "Customer-B Primary"
     customer: "Customer B"
     sla_tier: "gold"
-    src: R2
-    dst: R6
+    src: P-02
+    dst: PE-02
     bandwidth_gbps: 1.5
     priority: 2
     
     primary_path:
-      explicit: ["R2","R3","R4","R5","R6"]
+      explicit: ["P-02","PE-03","PE-04","P-01","PE-02"]
       igp_metric_sum: 40
       
     protection:
       type: "path"
-      backup_path: ["R2","R5","R6"]
+      backup_path: ["P-02","P-01","PE-02"]
       
     constraints:
       avoid_links: []
@@ -66,20 +66,20 @@ lsps:
       notify_on_reroute: true
       approval_required: false
       preferred_reroute_paths:
-        - ["R2","R5","R6"]
-        - ["R2","R1","R6"]
+        - ["P-02","P-01","PE-02"]
+        - ["P-02","PE-01","PE-02"]
 
   lsp-mgmt:
     name: "Management"
     customer: "Internal"
     sla_tier: "standard"
-    src: R1
-    dst: R6
+    src: PE-01
+    dst: PE-02
     bandwidth_gbps: 0.5
     priority: 7                     # lowest
     
     primary_path:
-      explicit: ["R1","R6"]
+      explicit: ["PE-01","PE-02"]
       igp_metric_sum: 10
       
     protection:

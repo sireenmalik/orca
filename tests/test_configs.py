@@ -38,7 +38,7 @@ def test_all_routers_have_candidate_config():
     with open(NETWORK_SPEC) as f:
         content = f.read()
     # Extract node names from YAML block in markdown
-    nodes = re.findall(r'^  (R\d+):', content, re.MULTILINE)
+    nodes = re.findall(r'^  ((?:PE|P)-\d+):', content, re.MULTILINE)
     nodes = list(set(nodes))
     configs = get_candidate_configs()
     config_devices = [os.path.basename(c).replace(".conf", "") for c in configs]
@@ -85,14 +85,14 @@ def test_config_metrics_are_positive():
                 f"{config_path}: non-positive metric value {m}"
 
 def test_r1_has_customer_lsp():
-    """R1 must have lsp-customer-a defined (it originates this LSP)."""
-    r1_configs = [c for c in get_candidate_configs() if "R1.conf" in c]
-    assert len(r1_configs) > 0, "No R1 candidate config found"
+    """PE-01 must have lsp-customer-a defined (it originates this LSP)."""
+    r1_configs = [c for c in get_candidate_configs() if "PE-01.conf" in c]
+    assert len(r1_configs) > 0, "No PE-01 candidate config found"
     with open(r1_configs[0]) as f:
         content = f.read()
     lsps = parse_lsp_names_from_config(content)
     assert "lsp-customer-a" in lsps, \
-        "R1 config missing lsp-customer-a"
+        "PE-01 config missing lsp-customer-a"
 
 def test_no_config_references_down_interface():
     """Configs should not have admin-state disable on core interfaces."""

@@ -7,49 +7,49 @@ sys.path.insert(0, '.')
 from agent.cspf import cspf, k_shortest_paths, verify_mission_1, verify_mission_2
 
 TOPOLOGY = {
-    "nodes": {n: {"id": n, "state": "up"} for n in ["R1","R2","R3","R4","R5","R6"]},
+    "nodes": {n: {"id": n, "state": "up"} for n in ["PE-01","P-02","PE-03","PE-04","P-01","PE-02"]},
     "links": {
-        "R1-R2": {"src": "R1", "dst": "R2", "state": "up", "utilization_pct": 45.0, "capacity_gbps": 10, "igp_metric": 10},
-        "R2-R3": {"src": "R2", "dst": "R3", "state": "up", "utilization_pct": 52.0, "capacity_gbps": 10, "igp_metric": 10},
-        "R3-R4": {"src": "R3", "dst": "R4", "state": "up", "utilization_pct": 48.0, "capacity_gbps": 10, "igp_metric": 10},
-        "R4-R5": {"src": "R4", "dst": "R5", "state": "up", "utilization_pct": 38.0, "capacity_gbps": 10, "igp_metric": 10},
-        "R5-R6": {"src": "R5", "dst": "R6", "state": "up", "utilization_pct": 42.0, "capacity_gbps": 10, "igp_metric": 10},
-        "R6-R1": {"src": "R6", "dst": "R1", "state": "up", "utilization_pct": 35.0, "capacity_gbps": 10, "igp_metric": 10},
-        "R1-R4": {"src": "R1", "dst": "R4", "state": "up", "utilization_pct": 28.0, "capacity_gbps": 10, "igp_metric": 10},
-        "R2-R5": {"src": "R2", "dst": "R5", "state": "up", "utilization_pct": 31.0, "capacity_gbps": 10, "igp_metric": 10},
+        "PE-01-P-02": {"src": "PE-01", "dst": "P-02", "state": "up", "utilization_pct": 45.0, "capacity_gbps": 10, "igp_metric": 10},
+        "P-02-PE-03": {"src": "P-02", "dst": "PE-03", "state": "up", "utilization_pct": 52.0, "capacity_gbps": 10, "igp_metric": 10},
+        "PE-03-PE-04": {"src": "PE-03", "dst": "PE-04", "state": "up", "utilization_pct": 48.0, "capacity_gbps": 10, "igp_metric": 10},
+        "PE-04-P-01": {"src": "PE-04", "dst": "P-01", "state": "up", "utilization_pct": 38.0, "capacity_gbps": 10, "igp_metric": 10},
+        "P-01-PE-02": {"src": "P-01", "dst": "PE-02", "state": "up", "utilization_pct": 42.0, "capacity_gbps": 10, "igp_metric": 10},
+        "PE-02-PE-01": {"src": "PE-02", "dst": "PE-01", "state": "up", "utilization_pct": 35.0, "capacity_gbps": 10, "igp_metric": 10},
+        "PE-01-PE-04": {"src": "PE-01", "dst": "PE-04", "state": "up", "utilization_pct": 28.0, "capacity_gbps": 10, "igp_metric": 10},
+        "P-02-P-01": {"src": "P-02", "dst": "P-01", "state": "up", "utilization_pct": 31.0, "capacity_gbps": 10, "igp_metric": 10},
     }
 }
 
 def test_basic_path():
-    path = cspf(TOPOLOGY, "R1", "R4")
+    path = cspf(TOPOLOGY, "PE-01", "PE-04")
     assert path is not None
-    assert path[0] == "R1"
-    assert path[-1] == "R4"
+    assert path[0] == "PE-01"
+    assert path[-1] == "PE-04"
 
 def test_direct_path_preferred():
-    path = cspf(TOPOLOGY, "R1", "R4")
-    assert path == ["R1", "R4"]  # direct cross-link is shortest
+    path = cspf(TOPOLOGY, "PE-01", "PE-04")
+    assert path == ["PE-01", "PE-04"]  # direct cross-link is shortest
 
 def test_down_link_avoided():
     topo = {**TOPOLOGY, "links": {**TOPOLOGY["links"],
-        "R1-R4": {**TOPOLOGY["links"]["R1-R4"], "state": "down"}}}
-    path = cspf(topo, "R1", "R4")
+        "PE-01-PE-04": {**TOPOLOGY["links"]["PE-01-PE-04"], "state": "down"}}}
+    path = cspf(topo, "PE-01", "PE-04")
     assert path is not None
-    assert "R1-R4" not in [f"{path[i]}-{path[i+1]}" for i in range(len(path)-1)]
+    assert "PE-01-PE-04" not in [f"{path[i]}-{path[i+1]}" for i in range(len(path)-1)]
 
 def test_mission_1():
-    path = ["R1", "R4"]
+    path = ["PE-01", "PE-04"]
     assert verify_mission_1(path, TOPOLOGY) == True
 
 def test_k_paths():
-    paths = k_shortest_paths(TOPOLOGY, "R1", "R4", k=3)
+    paths = k_shortest_paths(TOPOLOGY, "PE-01", "PE-04", k=3)
     assert len(paths) >= 1
-    assert all(p[0] == "R1" and p[-1] == "R4" for p in paths)
+    assert all(p[0] == "PE-01" and p[-1] == "PE-04" for p in paths)
 
 def test_mission_2_ranking():
-    paths = [["R1","R4"], ["R1","R2","R3","R4"]]
+    paths = [["PE-01","PE-04"], ["PE-01","P-02","PE-03","PE-04"]]
     ranked = verify_mission_2(paths, TOPOLOGY)
-    assert ranked[0] == ["R1","R4"]  # lower max util
+    assert ranked[0] == ["PE-01","PE-04"]  # lower max util
 
 if __name__ == "__main__":
     for name, fn in list(globals().items()):

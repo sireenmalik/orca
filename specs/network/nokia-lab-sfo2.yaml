@@ -14,42 +14,42 @@ owner: "sireenmalik@gmail.com"
 
 ```yaml
 nodes:
-  R1:
+  PE-01:
     role: core
     loopback: 10.0.0.1
     platform: "Nokia 7750 SR-12"
     location: "DC-SFO2 / Rack A1"
     mgmt_ip: 192.168.1.1
     
-  R2:
+  P-02:
     role: core
     loopback: 10.0.0.2
     platform: "Nokia 7750 SR-12"
     location: "DC-SFO2 / Rack A2"
     mgmt_ip: 192.168.1.2
 
-  R3:
+  PE-03:
     role: core
     loopback: 10.0.0.3
     platform: "Nokia 7750 SR-12"
     location: "DC-SFO2 / Rack A3"
     mgmt_ip: 192.168.1.3
 
-  R4:
+  PE-04:
     role: core
     loopback: 10.0.0.4
     platform: "Nokia 7750 SR-12"
     location: "DC-SFO2 / Rack A4"
     mgmt_ip: 192.168.1.4
 
-  R5:
+  P-01:
     role: core
     loopback: 10.0.0.5
     platform: "Nokia 7750 SR-12"
     location: "DC-SFO2 / Rack B1"
     mgmt_ip: 192.168.1.5
 
-  R6:
+  PE-02:
     role: core
     loopback: 10.0.0.6
     platform: "Nokia 7750 SR-12"
@@ -57,73 +57,73 @@ nodes:
     mgmt_ip: 192.168.1.6
 
 links:
-  R1-R2:
-    src: R1
+  PE-01-P-02:
+    src: PE-01
     src_iface: "1/1/1"
-    dst: R2
+    dst: P-02
     dst_iface: "1/1/1"
     capacity_gbps: 10
     igp_metric: 10
     baseline_utilization_pct: 45.0
 
-  R2-R3:
-    src: R2
+  P-02-PE-03:
+    src: P-02
     src_iface: "1/1/2"
-    dst: R3
+    dst: PE-03
     dst_iface: "1/1/1"
     capacity_gbps: 10
     igp_metric: 10
     baseline_utilization_pct: 52.0
 
-  R3-R4:
-    src: R3
+  PE-03-PE-04:
+    src: PE-03
     src_iface: "1/1/2"
-    dst: R4
+    dst: PE-04
     dst_iface: "1/1/1"
     capacity_gbps: 10
     igp_metric: 10
     baseline_utilization_pct: 48.0
 
-  R4-R5:
-    src: R4
+  PE-04-P-01:
+    src: PE-04
     src_iface: "1/1/2"
-    dst: R5
+    dst: P-01
     dst_iface: "1/1/1"
     capacity_gbps: 10
     igp_metric: 10
     baseline_utilization_pct: 38.0
 
-  R5-R6:
-    src: R5
+  P-01-PE-02:
+    src: P-01
     src_iface: "1/1/2"
-    dst: R6
+    dst: PE-02
     dst_iface: "1/1/1"
     capacity_gbps: 10
     igp_metric: 10
     baseline_utilization_pct: 42.0
 
-  R6-R1:
-    src: R6
+  PE-02-PE-01:
+    src: PE-02
     src_iface: "1/1/2"
-    dst: R1
+    dst: PE-01
     dst_iface: "1/1/2"
     capacity_gbps: 10
     igp_metric: 10
     baseline_utilization_pct: 35.0
 
-  R1-R4:
-    src: R1
+  PE-01-PE-04:
+    src: PE-01
     src_iface: "1/1/3"
-    dst: R4
+    dst: PE-04
     dst_iface: "1/1/3"
     capacity_gbps: 10
     igp_metric: 10
     baseline_utilization_pct: 28.0
 
-  R2-R5:
-    src: R2
+  P-02-P-01:
+    src: P-02
     src_iface: "1/1/3"
-    dst: R5
+    dst: P-01
     dst_iface: "1/1/3"
     capacity_gbps: 10
     igp_metric: 10

@@ -321,7 +321,7 @@ async def _open_github_pr(inputs: dict) -> dict:
 
     # Derive affected routers from changes
     changes = inputs.get("changes", [])
-    routers = list({ch.get("node", ch.get("router", "R1")) for ch in changes}) or ["R1"]
+    routers = list({ch.get("node", ch.get("router", "PE-01")) for ch in changes}) or ["PE-01"]
     branch = f"cfg/{'_'.join(routers)}-{ts}"
 
     # ── 1. Get main SHA ──
@@ -342,7 +342,7 @@ async def _open_github_pr(inputs: dict) -> dict:
     commit_sha = ""
     diff_by_router = {}
     for ch in changes:
-        node = ch.get("node", ch.get("router", "R1"))
+        node = ch.get("node", ch.get("router", "PE-01"))
         if node not in diff_by_router:
             diff_by_router[node] = []
         diff_by_router[node].append(ch)
@@ -590,7 +590,7 @@ class ORCAAgent:
              "input_schema": {"type": "object", "properties": {}}},
             {"name": "get_link_utilization", "description": "Get link utilization. Omit link_id for all links.",
              "input_schema": {"type": "object", "properties": {
-                 "link_id": {"type": "string", "description": "Link ID e.g. R1-R2. Omit for all."}}}},
+                 "link_id": {"type": "string", "description": "Link ID e.g. PE-01-P-02. Omit for all."}}}},
             {"name": "get_lsp_state", "description": "Get all MPLS LSPs with paths and state.",
              "input_schema": {"type": "object", "properties": {}}},
             {"name": "get_alarms", "description": "Get active network alarms.",
@@ -625,28 +625,28 @@ class ORCAAgent:
              "input_schema": {"type": "object", "properties": {
                  "trigger_type": {"type": "string", "enum": ["link_failure","congestion","manual","scheduled"]},
                  "trigger_link": {"type": "string"},
-                 "actions_taken": {"type": "array", "items": {"type": "string"}, "description": "List of actions e.g. ['rerouted lsp-customer-a via R1-R6-R5-R4']"},
+                 "actions_taken": {"type": "array", "items": {"type": "string"}, "description": "List of actions e.g. ['rerouted lsp-customer-a via PE-01-PE-02-P-01-PE-04']"},
                  "outcome": {"type": "string", "enum": ["success","rollback","partial","escalated"]},
                  "mission_1_satisfied": {"type": "boolean"},
                  "mission_2_improvement_pct": {"type": "number"},
                  "time_to_resolution_seconds": {"type": "number"},
                  "human_override": {"type": "boolean"},
                  "override_reason": {"type": "string"},
-                 "learned_constraint": {"type": "string", "description": "Optional: any new constraint to propose e.g. 'avoid R5-R6 under peak load'"}},
+                 "learned_constraint": {"type": "string", "description": "Optional: any new constraint to propose e.g. 'avoid P-01-PE-02 under peak load'"}},
                  "required": ["trigger_type", "actions_taken", "outcome", "mission_1_satisfied"]}},
             {"name": "open_pull_request",
              "description": "Create a Git branch, commit the config change, and open a Pull Request on GitHub for engineer review. Call this after propose_config_change is approved or when a permanent config change should be tracked in Git.",
              "input_schema": {"type": "object", "properties": {
-                 "title": {"type": "string", "description": "PR title e.g. 'fix: update R1 IS-IS metrics after R1-R4 failure'"},
+                 "title": {"type": "string", "description": "PR title e.g. 'fix: update PE-01 IS-IS metrics after PE-01-PE-04 failure'"},
                  "body": {"type": "string", "description": "PR description — incident summary, what changed, why, validation results"},
-                 "device": {"type": "string", "description": "Device name e.g. R1"},
+                 "device": {"type": "string", "description": "Device name e.g. PE-01"},
                  "config_content": {"type": "string", "description": "Full config content to commit to candidate/"},
-                 "config_path": {"type": "string", "description": "File path e.g. config_mgmt/candidate/nokia-lab-sfo2/R1.conf"}},
+                 "config_path": {"type": "string", "description": "File path e.g. config_mgmt/candidate/nokia-lab-sfo2/PE-01.conf"}},
                  "required": ["title", "body", "device", "config_content", "config_path"]}},
             {"name": "detect_config_drift",
              "description": "Compare running device config against the approved Git baseline. Returns any unauthorized changes not in the approved config. Call this when security_violation alarm is detected or during routine security checks.",
              "input_schema": {"type": "object", "properties": {
-                 "node": {"type": "string", "description": "Router node to check e.g. R1"}},
+                 "node": {"type": "string", "description": "Router node to check e.g. PE-01"}},
                  "required": ["node"]}},
             {"name": "raise_security_alert",
              "description": "Raise a security alert in the dashboard. Creates a security event in the Security tab. Call this when unauthorized config changes, rogue additions, or policy violations are detected.",
@@ -666,7 +666,7 @@ class ORCAAgent:
             {"name": "propose_config_change",
              "description": "Propose a permanent config change (metric adjustment, LSP path update). Shows diff in dashboard for operator approval before pushing to network.",
              "input_schema": {"type": "object", "properties": {
-                 "title": {"type": "string", "description": "Short description e.g. 'Update R1 IGP metrics after R1-R4 failure'"},
+                 "title": {"type": "string", "description": "Short description e.g. 'Update PE-01 IGP metrics after PE-01-PE-04 failure'"},
                  "reason": {"type": "string", "description": "Why this change is needed"},
                  "validation_results": {"type": "object", "description": "Results of validation checks",
                      "properties": {
@@ -723,7 +723,7 @@ class ORCAAgent:
                 subject = f"[TAC {inputs.get('severity','P2')}] {vendor.upper()} — {inputs.get('fault_type','Fault')} on {inputs.get('node','Unknown')}"
                 result = send_email(to=to, subject=subject, body=body)
             elif name == "detect_config_drift":
-                node = inputs.get("node", "R1")
+                node = inputs.get("node", "PE-01")
                 running = await self.adapter.get_running_config(node) if hasattr(self.adapter, 'get_running_config') else {}
                 approved = await self.adapter.get_approved_config(node) if hasattr(self.adapter, 'get_approved_config') else {}
                 rogue_meta = running.get("_rogue_meta")
@@ -742,7 +742,7 @@ class ORCAAgent:
             elif name == "raise_security_alert":
                 import base64 as _b64, urllib.request as _ur, os as _os, json as _json
 
-                node      = inputs.get("node", "R1")
+                node      = inputs.get("node", "PE-01")
                 severity  = inputs.get("severity", "critical")
                 alert_type = inputs.get("type", "unauthorized_config_change")
                 detail    = inputs.get("detail", "")

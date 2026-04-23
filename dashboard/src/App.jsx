@@ -103,7 +103,7 @@ function TopologyMap({ nodes, links }) {
     const pad = Math.min(W, H) * 0.17;
     const cx = W / 2, cy = H / 2;
     const rx = W / 2 - pad, ry = H / 2 - pad;
-    const ring = ["R1","R2","R3","R4","R5","R6"];
+    const ring = ["PE-01","P-02","PE-03","PE-04","P-01","PE-02"];
     const pos = {};
     ring.forEach((id, i) => {
       const a = -Math.PI / 2 + (2 * Math.PI * i) / 6;
@@ -572,10 +572,10 @@ function EmailModal({ email, onClose, onSend }) {
 
 // ─── CONTROLS SLIM BAR ────────────────────────────────────────────────────────
 function ControlsBar({ onAnalyze, onAction }) {
-  const [link, setLink] = useState("R1-R4");
+  const [link, setLink] = useState("PE-01-PE-04");
   const [level, setLevel] = useState(92);
   const [rogueActive, setRogueActive] = useState(false);
-  const links = ["R1-R2","R2-R3","R3-R4","R4-R5","R5-R6","R6-R1","R1-R4","R2-R5"];
+  const links = ["PE-01-P-02","P-02-PE-03","PE-03-PE-04","PE-04-P-01","P-01-PE-02","PE-02-PE-01","PE-01-PE-04","P-02-P-01"];
 
   const injectRogue = async () => {
     await fetch(`${API}/api/demo/inject-rogue-config`, { method: "POST" });
@@ -1426,14 +1426,14 @@ function ChurnTab({ events }) {
             <line x1={x(3)} x2={x(3)} y1={y(3.9)+2} y2={y(3.9)+18} stroke={C.yellow} strokeWidth={1} strokeDasharray="2,2" />
             <polygon points={`${x(3)},${y(3.9)-6} ${x(3)+5},${y(3.9)+4} ${x(3)-5},${y(3.9)+4}`} fill={C.yellow} opacity={0.9} />
             <rect x={x(3)-28} y={y(3.9)-28} width={56} height={18} rx={3} fill="rgba(234,179,8,0.12)" stroke={C.yellow + "44"} />
-            <text x={x(3)} y={y(3.9)-16} fill={C.yellow} fontSize={8} textAnchor="middle" fontFamily="monospace">R2-R5 congestion</text>
+            <text x={x(3)} y={y(3.9)-16} fill={C.yellow} fontSize={8} textAnchor="middle" fontFamily="monospace">P-02-P-01 congestion</text>
             <text x={x(3)} y={y(3.9)-7} fill={C.yellow} fontSize={7} textAnchor="middle" fontFamily="monospace">ORCA: 23s</text>
 
-            {/* Incident 2: Apr R1-R4 failure — today, ORCA resolved */}
+            {/* Incident 2: Apr PE-01-PE-04 failure — today, ORCA resolved */}
             <line x1={x(5)} x2={x(5)} y1={y(3.4)+2} y2={y(3.4)+18} stroke={C.red} strokeWidth={1} strokeDasharray="2,2" />
             <polygon points={`${x(5)},${y(3.4)-6} ${x(5)+5},${y(3.4)+4} ${x(5)-5},${y(3.4)+4}`} fill={C.red} opacity={0.9} />
             <rect x={x(5)-32} y={y(3.4)-28} width={64} height={18} rx={3} fill="rgba(239,68,68,0.12)" stroke={C.red + "44"} />
-            <text x={x(5)} y={y(3.4)-16} fill={C.red} fontSize={8} textAnchor="middle" fontFamily="monospace">R1-R4 DOWN</text>
+            <text x={x(5)} y={y(3.4)-16} fill={C.red} fontSize={8} textAnchor="middle" fontFamily="monospace">PE-01-PE-04 DOWN</text>
             <text x={x(5)} y={y(3.4)-7} fill={C.green} fontSize={7} textAnchor="middle" fontFamily="monospace">ORCA: 47s ✓</text>
 
             {/* Gap annotation between with/without ORCA */}

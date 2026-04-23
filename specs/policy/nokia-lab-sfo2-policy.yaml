@@ -58,7 +58,7 @@ notifications:
 excluded_links: []
 # Example:
 # excluded_links:
-#   - link: "R5-R6"
+#   - link: "P-01-PE-02"
 #     reason: "Intermittent errors — avoid for primary paths"
 #     added: "2026-03-10"
 #     added_by: "operator"
@@ -75,8 +75,8 @@ overrides: []
 #   - timestamp: "2026-03-12T02:15:00Z"
 #     action: reroute_lsp
 #     lsp: "lsp-customer-a"
-#     proposed_path: ["R1","R6","R5","R4"]
-#     reason: "R6 scheduled for maintenance in 2 hours"
+#     proposed_path: ["PE-01","PE-02","P-01","PE-04"]
+#     reason: "PE-02 scheduled for maintenance in 2 hours"
 #     operator: "sireenmalik@gmail.com"
 #     learned: true                # ORCA will avoid this path until expiry
 ```

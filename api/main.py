@@ -142,15 +142,15 @@ class ProposalAction(BaseModel):
 async def inject_rogue_config():
     """Inject unauthorized config change for security breach demo."""
     import time as _time
-    result = adapter.inject_rogue_config("R1")
+    result = adapter.inject_rogue_config("PE-01")
     rogue_changes = result.get("changes", [])
 
     # Add alarm to network state
     from agent.adapter import Alarm
     alarm = Alarm(
         id=f"sec-alarm-{int(_time.time())}",
-        severity="critical", node="R1",
-        description="Security: Config drift detected on R1 — gNMI running config diverges from Git baseline"
+        severity="critical", node="PE-01",
+        description="Security: Config drift detected on PE-01 — gNMI running config diverges from Git baseline"
     )
     adapter._alarms.append(alarm)
 
@@ -159,7 +159,7 @@ async def inject_rogue_config():
     provisional_alert = {
         "id": f"sec-{int(_time.time())}",
         "timestamp": datetime.utcnow().isoformat(),
-        "node": "R1",
+        "node": "PE-01",
         "severity": "critical",
         "type": "unauthorized_config_change",
         "detail": f"Rogue changes detected: {', '.join(ch.get('parameter','?') for ch in rogue_changes)} — source IP {result.get('source_ip','10.0.3.44')} via NETCONF direct push",
@@ -178,7 +178,7 @@ async def inject_rogue_config():
         "data": {"alert": provisional_alert}
     })
     asyncio.create_task(_broadcast_state())
-    return {"success": True, "node": "R1", "changes": rogue_changes,
+    return {"success": True, "node": "PE-01", "changes": rogue_changes,
             "message": "Rogue config injected — security alert raised, ORCA will analyze"}
 
 @app.post("/api/demo/clear-rogue-config")
@@ -288,13 +288,13 @@ async def approve_proposal(proposal_id: str, body: ProposalAction = ProposalActi
         "digital_twin": "Simulated stable under peak load",
         "policy":       "Within policy, no excluded links used",
     })
-    trigger_link = proposal.get("trigger_link", "R1-R4")
+    trigger_link = proposal.get("trigger_link", "PE-01-PE-04")
     trigger_type = proposal.get("trigger_type", "link_failure")
     trigger_desc = proposal.get("reason", f"{trigger_type} on {trigger_link}")
     lsps_affected = proposal.get("lsps_affected", ["lsp-customer-a", "lsp-customer-b"])
     actions_taken = proposal.get("actions_taken", [
-        "rerouted lsp-customer-a via R1-R6-R5-R4",
-        "rerouted lsp-customer-b via R2-R5-R6",
+        "rerouted lsp-customer-a via PE-01-PE-02-P-01-PE-04",
+        "rerouted lsp-customer-b via P-02-P-01-PE-02",
         "notified ops team via email",
         "opened Nokia TAC P1 case",
         f"proposed and pushed permanent IGP metric changes: {proposal.get('title', 'config update')}"
@@ -310,10 +310,10 @@ async def approve_proposal(proposal_id: str, body: ProposalAction = ProposalActi
     max_after   = proposal.get("max_util_after", 0)
     improvement = proposal.get("mission_2_improvement_pct", 0)
     learned     = proposal.get("learned_constraint",
-        f"After {trigger_link} failure: prefer reroute via R1-R6-R5-R4 for lsp-customer-a")
+        f"After {trigger_link} failure: prefer reroute via PE-01-PE-02-P-01-PE-04 for lsp-customer-a")
 
     # Fix: agent sends 'device' key, not 'node'
-    routers = list({ch.get("device", ch.get("node", ch.get("router", "R1"))) for ch in changes}) or ["R1"]
+    routers = list({ch.get("device", ch.get("node", ch.get("router", "PE-01"))) for ch in changes}) or ["PE-01"]
     ts = datetime.utcnow().strftime("%Y%m%d-%H%M%S")
     branch = f"cfg/{'_'.join(sorted(routers))}-{ts}"
 

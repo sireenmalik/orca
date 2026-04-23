@@ -85,52 +85,52 @@ class ContainerlabAdapter(NetworkAdapter):
 
     TOPOLOGY = {
         "nodes": {
-            "R1": Node("R1", "10.0.0.1", "up", "core"),
-            "R2": Node("R2", "10.0.0.2", "up", "core"),
-            "R3": Node("R3", "10.0.0.3", "up", "core"),
-            "R4": Node("R4", "10.0.0.4", "up", "core"),
-            "R5": Node("R5", "10.0.0.5", "up", "core"),
-            "R6": Node("R6", "10.0.0.6", "up", "core"),
+            "PE-01": Node("PE-01", "10.0.0.1", "up", "core"),
+            "P-02": Node("P-02", "10.0.0.2", "up", "core"),
+            "PE-03": Node("PE-03", "10.0.0.3", "up", "core"),
+            "PE-04": Node("PE-04", "10.0.0.4", "up", "core"),
+            "P-01": Node("P-01", "10.0.0.5", "up", "core"),
+            "PE-02": Node("PE-02", "10.0.0.6", "up", "core"),
         },
         "links": {
-            "R1-R2": Link("R1-R2", "R1", "R2", "eth1", "eth1", 10.0),
-            "R2-R3": Link("R2-R3", "R2", "R3", "eth2", "eth1", 10.0),
-            "R3-R4": Link("R3-R4", "R3", "R4", "eth2", "eth1", 10.0),
-            "R4-R5": Link("R4-R5", "R4", "R5", "eth2", "eth1", 10.0),
-            "R5-R6": Link("R5-R6", "R5", "R6", "eth2", "eth1", 10.0),
-            "R6-R1": Link("R6-R1", "R6", "R1", "eth2", "eth2", 10.0),
-            "R1-R4": Link("R1-R4", "R1", "R4", "eth3", "eth3", 10.0),
-            "R2-R5": Link("R2-R5", "R2", "R5", "eth3", "eth3", 10.0),
+            "PE-01-P-02": Link("PE-01-P-02", "PE-01", "P-02", "eth1", "eth1", 10.0),
+            "P-02-PE-03": Link("P-02-PE-03", "P-02", "PE-03", "eth2", "eth1", 10.0),
+            "PE-03-PE-04": Link("PE-03-PE-04", "PE-03", "PE-04", "eth2", "eth1", 10.0),
+            "PE-04-P-01": Link("PE-04-P-01", "PE-04", "P-01", "eth2", "eth1", 10.0),
+            "P-01-PE-02": Link("P-01-PE-02", "P-01", "PE-02", "eth2", "eth1", 10.0),
+            "PE-02-PE-01": Link("PE-02-PE-01", "PE-02", "PE-01", "eth2", "eth2", 10.0),
+            "PE-01-PE-04": Link("PE-01-PE-04", "PE-01", "PE-04", "eth3", "eth3", 10.0),
+            "P-02-P-01": Link("P-02-P-01", "P-02", "P-01", "eth3", "eth3", 10.0),
         }
     }
 
     LSP_DEFAULTS = {
-        "lsp-customer-a": LSP("lsp-customer-a", "Customer-A Primary", "R1", "R4",
-                              ["R1","R2","R3","R4"], 2.0),
-        "lsp-customer-b": LSP("lsp-customer-b", "Customer-B Primary", "R2", "R6",
-                              ["R2","R3","R4","R5","R6"], 1.5),
-        "lsp-mgmt":       LSP("lsp-mgmt", "Management", "R1", "R6",
-                              ["R1","R6"], 0.5),
+        "lsp-customer-a": LSP("lsp-customer-a", "Customer-A Primary", "PE-01", "PE-04",
+                              ["PE-01","P-02","PE-03","PE-04"], 2.0),
+        "lsp-customer-b": LSP("lsp-customer-b", "Customer-B Primary", "P-02", "PE-02",
+                              ["P-02","PE-03","PE-04","P-01","PE-02"], 1.5),
+        "lsp-mgmt":       LSP("lsp-mgmt", "Management", "PE-01", "PE-02",
+                              ["PE-01","PE-02"], 0.5),
     }
 
     # Approved baseline configs (what should be on each router)
     APPROVED_CONFIGS = {
-        "R1": {
-            "isis_metrics": {"to-R2": 10, "to-R6": 10, "to-R4": 15},
+        "PE-01": {
+            "isis_metrics": {"to-P-02": 10, "to-PE-02": 10, "to-PE-04": 15},
             "snmp_communities": ["public-read-only"],
             "bgp_neighbors": [],
             "acl_rules": ["permit established", "deny any log"],
             "logging": "enabled",
         },
-        "R2": {
-            "isis_metrics": {"to-R1": 10, "to-R3": 10, "to-R5": 15},
+        "P-02": {
+            "isis_metrics": {"to-PE-01": 10, "to-PE-03": 10, "to-P-01": 15},
             "snmp_communities": ["public-read-only"],
             "bgp_neighbors": [],
             "acl_rules": ["permit established", "deny any log"],
             "logging": "enabled",
         },
-        "R3": {
-            "isis_metrics": {"to-R2": 10, "to-R4": 10},
+        "PE-03": {
+            "isis_metrics": {"to-P-02": 10, "to-PE-04": 10},
             "snmp_communities": ["public-read-only"],
             "bgp_neighbors": [],
             "acl_rules": ["permit established", "deny any log"],
@@ -150,9 +150,9 @@ class ContainerlabAdapter(NetworkAdapter):
         self._metrics = {lid: 10 for lid in self._links}
         self._start_time = time.time()
         self._base_util = {
-            "R1-R2": 35.0, "R2-R3": 40.0, "R3-R4": 38.0,
-            "R4-R5": 28.0, "R5-R6": 32.0, "R6-R1": 25.0,
-            "R1-R4": 22.0, "R2-R5": 24.0
+            "PE-01-P-02": 35.0, "P-02-PE-03": 40.0, "PE-03-PE-04": 38.0,
+            "PE-04-P-01": 28.0, "P-01-PE-02": 32.0, "PE-02-PE-01": 25.0,
+            "PE-01-PE-04": 22.0, "P-02-P-01": 24.0
         }
         # Security: rogue config injection flag
         self._rogue_config: dict = {}  # node -> list of rogue changes
@@ -160,7 +160,7 @@ class ContainerlabAdapter(NetworkAdapter):
         self._lsp_history: dict = {lsp_id: [] for lsp_id in self.LSP_DEFAULTS}
         self._history_tick = 0
 
-    def inject_rogue_config(self, node: str = "R1") -> dict:
+    def inject_rogue_config(self, node: str = "PE-01") -> dict:
         """Simulate an unauthorized config change pushed directly to a router."""
         rogue = {
             "node": node,
@@ -312,9 +312,9 @@ class ContainerlabAdapter(NetworkAdapter):
         link.state = "up"
         link.utilization_pct = 0.0
         baseline = {
-            "R1-R2": 35.0, "R2-R3": 40.0, "R3-R4": 38.0,
-            "R4-R5": 28.0, "R5-R6": 32.0, "R6-R1": 25.0,
-            "R1-R4": 22.0, "R2-R5": 24.0
+            "PE-01-P-02": 35.0, "P-02-PE-03": 40.0, "PE-03-PE-04": 38.0,
+            "PE-04-P-01": 28.0, "P-01-PE-02": 32.0, "PE-02-PE-01": 25.0,
+            "PE-01-PE-04": 22.0, "P-02-P-01": 24.0
         }
         self._base_util[link_id] = baseline.get(link_id, 40.0)
         adjacent = self._find_adjacent_links(link_id)

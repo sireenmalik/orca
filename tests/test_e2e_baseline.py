@@ -136,14 +136,14 @@ def test_use_case_1_full_flow(clean_state):
     approve → PR opened → Config Deployed email queued → episode written
     with PR cross-reference."""
     # 1. Inject fault
-    status, body = post("/api/demo/inject-failure", {"link_id": "R1-R4"})
+    status, body = post("/api/demo/inject-failure", {"link_id": "PE-01-PE-04"})
     assert status == 200 and body.get("success"), body
     assert body.get("state") == "down"
 
     # 2. Trigger analyze (don't rely on poll loop — tests shouldn't be flaky)
     status, body = post("/api/agent/analyze", {
         "context": (
-            "CRITICAL: R1-R4 DOWN. Reroute affected LSPs, then call "
+            "CRITICAL: PE-01-PE-04 DOWN. Reroute affected LSPs, then call "
             "propose_config_change to stage permanent IGP metric changes, "
             "then open_pull_request, then write_episode."
         )
@@ -216,9 +216,9 @@ def test_use_case_1_full_flow(clean_state):
 def test_idempotent_approve_invariant_E(clean_state):
     """Approving the same proposal twice must not spawn stream_approval
     twice — no duplicate PRs, no duplicate Config Deployed emails."""
-    post("/api/demo/inject-failure", {"link_id": "R1-R4"})
+    post("/api/demo/inject-failure", {"link_id": "PE-01-PE-04"})
     post("/api/agent/analyze", {
-        "context": "R1-R4 DOWN. Reroute then propose_config_change then write_episode.",
+        "context": "PE-01-PE-04 DOWN. Reroute then propose_config_change then write_episode.",
     })
 
     def has_proposal():
@@ -267,7 +267,7 @@ def test_use_case_2_security_flow(clean_state):
     # 2. Trigger analyze to run full security handler
     post("/api/agent/analyze", {
         "context": (
-            "SECURITY: config drift alarm on R1. Call detect_config_drift "
+            "SECURITY: config drift alarm on PE-01. Call detect_config_drift "
             "then raise_security_alert to archive evidence, create a revert "
             "proposal, and notify NOC + TAC."
         ),
@@ -287,11 +287,11 @@ def test_use_case_2_security_flow(clean_state):
     revert = _wait_for(has_security_proposal, ANALYZE_TIMEOUT_S,
                       msg="security revert proposal")
 
-    # Revert must carry rogue→baseline diff on R1
+    # Revert must carry rogue→baseline diff on PE-01
     changes = revert.get("changes", [])
     assert changes, "revert proposal has no changes"
     targets = {ch.get("device") for ch in changes}
-    assert "R1" in targets, f"revert must target R1, got {targets}"
+    assert "PE-01" in targets, f"revert must target PE-01, got {targets}"
 
     # 4. NOC + TAC emails must both be queued (invariant F)
     s, b = get("/api/emails")
@@ -319,7 +319,7 @@ def test_use_case_2_security_flow(clean_state):
 
     remediated = _wait_for(alert_remediated, STREAM_APPROVAL_TIMEOUT_S,
                           msg="security alert flipped to remediated")
-    assert remediated.get("node") == "R1"
+    assert remediated.get("node") == "PE-01"
     assert remediated.get("remediation_pr_number"), \
         "remediated alert must carry a PR number"
 
@@ -335,7 +335,7 @@ def test_use_case_3_churn_live_shape(clean_state):
     baseline = b["risks"]
 
     # Inject fault — churn probability for affected LSPs should eventually rise
-    post("/api/demo/inject-failure", {"link_id": "R1-R4"})
+    post("/api/demo/inject-failure", {"link_id": "PE-01-PE-04"})
 
     s, b = get("/api/churn-risk")
     assert s == 200
