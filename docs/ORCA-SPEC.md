@@ -1,6 +1,12 @@
 # ORCA — Project Specification
 **Autonomous Network Operations & Response Agent**
-Version: 33 | Last updated: 2026-04-23
+Version: **1.0.0-baseline** | Last updated: 2026-04-23
+
+Baseline tagged `v1.0.0` on commit — all three use cases (LSP
+reroute + approve, security rogue-config + revert, churn forecast) are
+verified working end-to-end by `tests/test_e2e_baseline.py`. This spec
+is the source of truth for that baseline; changes below this line are
+additions since the pre-baseline session notes.
 
 ---
 
@@ -150,36 +156,83 @@ All events: `{type, timestamp, data}`. `timestamp` is ISO string.
 
 ## Three Use Cases
 
-### Use Case 1 — Network Operations & Predictive Maintenance
-**Flow:** Inject Fault (R1-R4) → Analyze → ORCA reroutes LSPs → Config Proposal → Approve & Push → Git stream → GitHub PR → Episode
+### Use Case 1 — Network Operations (7-step flow)
 
-**Key demo moments:**
-- CSPF path computation in agent log
-- Missions satisfied: M1 ✅ M2 ✅
-- Config modal: left sidebar (6 validation checks), center diff (red/green), right proposed config, device tabs
-- Git commands streaming live in agent log
-- GitHub PR with full incident narrative + validation table + per-router diffs
-- Episode YAML cross-referenced to PR
+1. **Fault injection** — `POST /api/demo/inject-failure {link_id: "R1-R4"}`.
+   Adapter marks link down, broadcasts `state_update`. Dashboard paints
+   the link red + dashed.
+2. **Observe** — agent calls `get_topology`, `get_link_utilization`,
+   `get_lsp_state`, `get_alarms`.
+3. **Reason + act** — agent reroutes `lsp-customer-a` to `R1→R6→R5→R4`
+   and `lsp-customer-b` to `R2→R5→R6`; `lsp-mgmt` stays on `R1→R6`
+   (`approval_required: true`). Two emails queue: NOC summary (yellow
+   border) + Nokia TAC P1 case (yellow border).
+4. **Propose** — `propose_config_change` creates a pending proposal in
+   `_config_proposals` with validation_checks + validation_detail +
+   device-keyed changes. Agent captures `util_before` (pre-action
+   snapshot from `analyze()` cycle start) and `util_after` on the
+   proposal; `max_util_*` and `mission_2_improvement_pct` derived.
+5. **Approve & push** — operator clicks Approve in Config Modal → frontend
+   POSTs `/api/config-proposals/{id}/approved`. `stream_approval` runs
+   async:
+   - 4 git commands stream (0.6s apart) in agent log
+   - NETCONF per-router simulation (0.5s apart)
+   - `open_pull_request` opens a real GitHub PR (title `cfg: {title}
+     [{timestamp}]`, branch `cfg/{routers}-{ts}`, incident body with
+     mission compliance + validation + per-router diff)
+   - `write_episode` enriches with util_before/after and the proposal's
+     changes, writes `skills/past/episodes/{YYYY-MM}/ep-{ts}.yaml`
+     with PR cross-reference header
+   - Third email queues: `✅ ORCA Config Deployed — {title} | PR #N`
+     (green border). No duplicate: the same proposal cannot be approved
+     twice (see Idempotent Approve below).
+6. **Duplicate suppression** — after approval `agent._proposal_approved
+   = True` prevents re-proposal on the same fault signature until the
+   network heals (`has_fault = False`). Security / revert proposals are
+   NEVER suppressed by this flag.
 
 ### Use Case 2 — Security: Unauthorized Config Detection
-**Flow:** Inject Rogue Config → Security tab shows CRITICAL immediately → Analyze → ORCA detects drift → Evidence archived to Git → Evidence PR (auto) → Revert proposal (human-gated) → Approve → NETCONF revert → Episode
 
-**Key demo moments:**
-- Security tab updates on button click, no Analyze needed
-- Threat intel note: CISA AA24-038A (Salt Typhoon) reference
-- Evidence package in `security/incidents/{timestamp}-R1/`: rogue.conf, approved.conf, rogue.diff, metadata.yaml
-- Two GitHub items: evidence PR (auto-merged archival) + revert PR (human approval)
-- Red SECURITY badge on config proposal card
-- Security email card in outbox with evidence PR link
+1. **Rogue injection** — `POST /api/demo/inject-rogue-config` adds an
+   SNMP RW community + an overly-permissive ACL to R1's running config
+   (via adapter) plus a provisional `security_alert` in the Security
+   tab. No Analyze needed for the alert to appear.
+2. **Agent detects + classifies** — on next Analyze (or manual trigger),
+   agent calls `detect_config_drift` → `raise_security_alert`. The
+   alert is enriched with `classification: management_plane_exposure`
+   and a CISA AA24-038A (Salt Typhoon) threat-intel note.
+3. **Evidence archive** — `raise_security_alert` opens a git branch
+   `security/evidence-{ts}-{node}`, commits `rogue.conf`,
+   `approved.conf`, `rogue.diff`, `metadata.yaml` under
+   `security/incidents/{ts}-{node}/`, opens an **evidence PR** (archival
+   only).
+4. **Immediate notifications** — two emails send right away:
+   NOC security alert (`🔐 ORCA SECURITY ALERT …`) and
+   Nokia TAC P1 case (`[TAC P1] NOKIA — security_violation on {node}`).
+5. **Revert proposal** — a config proposal is created with
+   `security: True`, `alert_id`, `evidence_url`, and
+   `changes[].type = security_revert` showing rogue → baseline diff.
+   Red SECURITY badge on the card.
+6. **Approve revert** — same `/approved` route; `stream_approval` runs.
+   On success the linked security alert is flipped to
+   `status = "remediated"` with `remediation_pr_url` +
+   `remediation_pr_number` attached, then re-broadcast. Frontend
+   renders the alert in green with a ✓ and exposes a "🔀 Remediation PR"
+   link next to the evidence PR.
 
-### Use Case 3 — Customer Experience & Churn Forecast
-**Flow:** After fault resolution → Churn tab → Live SLA risk scores → Counterfactual panel → Revenue protected
+### Use Case 3 — Churn Forecast (live)
 
-**Key demo moments:**
-- Customer-A: risk 12→34, churn 1%→5% WITH ORCA vs 12→71, churn 1%→78% WITHOUT
-- Revenue protected: $2.4M ARR
-- Churn chart annotated with network incidents
-- "without ORCA" red dashed line diverges +1.35% by Aug
+The Churn tab's KPIs react to `/api/churn-risk`:
+
+- **Current Churn** = average of per-LSP `churn_probability_pct`.
+- **Forecast Q3** = `liveChurn × 0.95` (first forecast month, 5%
+  monotonic decay per month thereafter).
+- **At-Risk ARR** = sum of `arr_usd` for LSPs with `risk_band ∈
+  {at_risk, critical}`.
+- **Sparkline** — last history point is the live current churn; forecast
+  band retracks as risk bands shift.
+
+See `Churn Model` section for the per-LSP risk score formula.
 
 ---
 
@@ -292,6 +345,39 @@ Risk bands: Healthy (0-25), Watch (26-55), At Risk (56-80), Critical (81-100)
 History window: 96 slots = 24h at 15min intervals
 
 ---
+
+## Baseline invariants (tests pin these)
+
+1. **Every `/api/config-proposals/{id}/approved` call is idempotent.**
+   `_deploying_proposals` set in `api/main.py` ensures `stream_approval`
+   is spawned at most once per proposal. Second call returns
+   `{"status": "already_deploying"}` without side effects.
+2. **Agent sends `device` key** in `changes[]` — consumers must look up
+   `ch.get("device") or ch.get("node") or ch.get("router")`.
+3. **Episode always carries util_before / util_after** when an agent
+   cycle ran. `analyze()` snapshots pre-action utilization; the
+   `write_episode` dispatch in `_execute_tool` auto-enriches with that
+   snapshot + the latest pending proposal's `changes` + current
+   utilization. Per-link values are indented 6 spaces under `links:`.
+4. **Module-level `from datetime import datetime`** in
+   `agent/te_agent.py`. NO local `datetime` import inside any branch of
+   `_execute_tool` (would make the name function-scoped → UnboundLocalError
+   in every branch that doesn't import it).
+5. **Both `/approved` and `/approve` routes** must be registered on the
+   same handler.
+6. **Security flow: NOC + TAC emails go out immediately** from
+   `raise_security_alert`, not just on Analyze completion. Evidence PR
+   + revert proposal are both created before the operator sees
+   anything.
+7. **Security alert marks `remediated` on revert push.** Matching is
+   by `alert_id` when present, else by node against any active alert
+   whose node is in `changes[].device`.
+8. **`churnHistory` + `churnForecast` arrays are defined at module
+   scope** in `dashboard/src/App.jsx`. ChurnTab references them directly;
+   missing them throws ReferenceError → whole tab blank.
+9. **Agent log panel auto-scroll** respects a 100px bottom-proximity
+   check — doesn't snap to bottom when operator is reading earlier
+   entries.
 
 ## Roadmap
 

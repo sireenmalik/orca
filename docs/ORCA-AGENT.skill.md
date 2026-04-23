@@ -1,6 +1,67 @@
 # ORCA Agent Skill
 **Read this before touching agent/te_agent.py, agent/adapter.py, or api/main.py.**
 
+> **Baseline tagged `v1.0.0`.** Invariants in this file are pinned by
+> `tests/test_e2e_baseline.py`. Breaking one of the lettered rules in the
+> "Invariants" section will fail the baseline E2E suite.
+
+---
+
+## Invariants (must not break)
+
+**A. Module-level `from datetime import datetime` in `agent/te_agent.py`.**
+Any local `from datetime import datetime` inside a branch of
+`_execute_tool` makes `datetime` function-scoped throughout — sibling
+branches without their own import crash with `UnboundLocalError`. One
+local import silently kills every other tool that touches `datetime`.
+
+**B. `changes[]` uses the `device` key, not `node`/`router`.**
+Every consumer (`stream_approval`, `_write_episode`, frontend
+`ConfigModal`) must look up
+`ch.get("device") or ch.get("node") or ch.get("router")`.
+
+**C. `propose_config_change` captures `util_before`/`util_after`.**
+The handler reads `self._util_before_snapshot` (set at the top of
+`analyze()`) and snapshots current adapter state for `util_after`, then
+derives `max_util_before`, `max_util_after`, and
+`mission_2_improvement_pct`. Don't remove these — the episode YAML and
+the deployed-email body depend on them.
+
+**D. `write_episode` is auto-enriched in `_execute_tool`.**
+The LLM's tool schema intentionally doesn't advertise
+`utilization_before`/`utilization_after` or per-router diff keys. The
+dispatch injects them from `self._util_before_snapshot`, the current
+adapter state, and the most recent pending proposal's
+`changes`/`lsps_affected`. Keeps the schema minimal without losing data.
+
+**E. `/approved` and `/approve` are both registered on the same handler,
+and approval is idempotent.** `api/main.py` has a module-level
+`_deploying_proposals: set`. First POST wins — later POSTs (retry,
+double-click, both-routes) return `{"status": "already_deploying"}`
+without spawning stream_approval again. Removing this re-introduces
+duplicate PRs + duplicate "Config Deployed" emails.
+
+**F. Security flow: NOC + TAC emails fire from inside
+`raise_security_alert`, before the operator takes any action.**
+`build_tac_email("nokia", …)` produces the TAC body with
+`fault_type: security_violation`, `priority: P1`.
+
+**G. On successful security revert push, flip the linked alert to
+`status = "remediated"`.** Matching: prefer `proposal.alert_id`, else
+match by node against any non-remediated alert whose `node` is in
+`changes[].device`. Attach `remediation_pr_url` +
+`remediation_pr_number`, then re-broadcast the alert so the Security tab
+updates live.
+
+**H. `_proposal_approved` guard skips security/revert proposals.**
+```python
+is_security = (inputs.get("security", False)
+               or "security" in inputs.get("title", "").lower()
+               or "revert"   in inputs.get("title", "").lower())
+if getattr(self, "_proposal_approved", False) and not is_security:
+    # suppress
+```
+
 ---
 
 ## Agent Tools (full list)

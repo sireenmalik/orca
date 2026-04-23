@@ -1,6 +1,36 @@
 # ORCA Frontend Skill
 **Read this before touching dashboard/src/App.jsx.**
 
+> **Baseline tagged `v1.0.0`.** Invariants below are pinned by the
+> E2E suite; frontend-only items are verified by loading the dashboard
+> and checking that the ChurnTab renders + the Security tab updates on
+> remediation.
+
+## Frontend invariants (must not break)
+
+**α. Define `churnHistory` and `churnForecast` at module scope.** These
+drive the sparkline in ChurnTab. Removing them throws ReferenceError
+and the entire Churn tab goes blank (no error boundary).
+
+**β. AgentLogPanel auto-scroll respects a 100px bottom-proximity check.**
+Use `containerRef` on the scrollable div, and only set
+`el.scrollTop = el.scrollHeight` when the user is already within 100px
+of the bottom. Don't use `scrollIntoView` unconditionally — the log
+will snap-back on every new event and the operator can't read.
+
+**γ. Security alert status colors:** `active` → red, `remediated` /
+`resolved` / `blocked` → green, anything containing `revert` → yellow.
+Render `remediated` as `✓ remediated`. Expose the remediation PR link
+alongside the evidence PR link when `ev.remediation_pr_url` is set.
+
+**δ. Churn KPIs + sparkline derive from live risk data.** `liveChurn` is
+the average of `churn_probability_pct` across LSPs; `liveForecast[0].v
+= liveChurn × 0.95`; the sparkline's last history point is `liveChurn`
+(not the static April value), and the forecast band retracks as risk
+bands shift.
+
+**ε. D3 topology utilization labels are 17px bold monospace.**
+
 ---
 
 ## Theme
