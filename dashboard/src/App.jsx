@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState, useCallback, useMemo, memo } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, useCallback, useMemo, memo, Fragment } from "react";
 import * as d3 from "d3";
 
 const API = "";
@@ -30,6 +30,115 @@ const churnForecast = [
   { m: "Sep", v: 2.6, lo: 1.8, hi: 3.4 },
   { m: "Oct", v: 2.5, lo: 1.6, hi: 3.4 },
 ];
+
+// ─── SPLIT PANE ───────────────────────────────────────────────────────────────
+// Lightweight resizable split container. Drag the 6px divider between
+// panes to resize; sizes are stored in state as percentages so the layout
+// reflows on window resize without losing user-chosen proportions.
+//
+//   <Split direction="horizontal" defaultSizes={[60, 40]}>
+//     <LeftPane />
+//     <RightPane />
+//   </Split>
+//
+// Children must be valid elements (one per pane). Size count must match
+// children count, summing to ~100. minPct keeps a pane from being dragged
+// to zero width/height.
+function Split({ direction = "horizontal", defaultSizes, children, minPct = 6, dividerColor }) {
+  const arr = Array.isArray(children) ? children.filter(Boolean) : [children];
+  const containerRef = useRef(null);
+  const [sizes, setSizes] = useState(
+    defaultSizes && defaultSizes.length === arr.length
+      ? defaultSizes
+      : Array(arr.length).fill(100 / arr.length)
+  );
+  const dragState = useRef(null);
+  const isHoriz = direction === "horizontal";
+
+  const onDividerDown = (i) => (e) => {
+    e.preventDefault();
+    const rect = containerRef.current.getBoundingClientRect();
+    dragState.current = {
+      idx: i,
+      startCoord: isHoriz ? e.clientX : e.clientY,
+      startSizes: [...sizes],
+      total: isHoriz ? rect.width : rect.height,
+    };
+    const onMove = (me) => {
+      const ds = dragState.current;
+      if (!ds || !ds.total) return;
+      const deltaPx = (isHoriz ? me.clientX : me.clientY) - ds.startCoord;
+      const deltaPct = (deltaPx / ds.total) * 100;
+      const next = [...ds.startSizes];
+      const a = ds.startSizes[ds.idx] + deltaPct;
+      const b = ds.startSizes[ds.idx + 1] - deltaPct;
+      if (a >= minPct && b >= minPct) {
+        next[ds.idx] = a;
+        next[ds.idx + 1] = b;
+        setSizes(next);
+      }
+    };
+    const onUp = () => {
+      dragState.current = null;
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+    };
+    document.body.style.cursor = isHoriz ? "col-resize" : "row-resize";
+    document.body.style.userSelect = "none";
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
+  };
+
+  const dividerBg = dividerColor || "rgba(255,255,255,0.04)";
+  const dividerHoverBg = "rgba(6,182,212,0.35)";
+
+  return (
+    <div
+      ref={containerRef}
+      style={{
+        display: "flex",
+        flexDirection: isHoriz ? "row" : "column",
+        width: "100%",
+        height: "100%",
+        minWidth: 0,
+        minHeight: 0,
+      }}
+    >
+      {arr.map((child, i) => (
+        <Fragment key={i}>
+          <div
+            style={{
+              flex: `0 0 ${sizes[i]}%`,
+              minWidth: 0,
+              minHeight: 0,
+              overflow: "hidden",
+              display: "flex",
+              flexDirection: "column",
+            }}
+          >
+            {child}
+          </div>
+          {i < arr.length - 1 && (
+            <div
+              onMouseDown={onDividerDown(i)}
+              onMouseEnter={(e) => (e.currentTarget.style.background = dividerHoverBg)}
+              onMouseLeave={(e) => (e.currentTarget.style.background = dividerBg)}
+              style={{
+                flex: "0 0 6px",
+                background: dividerBg,
+                cursor: isHoriz ? "col-resize" : "row-resize",
+                transition: "background 0.15s",
+                zIndex: 2,
+              }}
+            />
+          )}
+        </Fragment>
+      ))}
+    </div>
+  );
+}
 
 // ─── SHARED PANEL ─────────────────────────────────────────────────────────────
 function Panel({ title, badge, children, style }) {
@@ -124,12 +233,24 @@ function TopologyMap({ nodes, links, lsps, slices }) {
     d3.select(svgRef.current).selectAll("*").remove();
     const svg = d3.select(svgRef.current).attr("width", W).attr("height", H);
 
-    // Layout
-    const padX = 60, padY = 50;
+    // Scale everything proportionally to container. Target design size is
+    // ~900×500; if the panel is smaller we shrink, larger we stretch
+    // (capped so nodes don't get absurdly huge on fullscreen).
+    const designW = 900, designH = 500;
+    const scale = Math.min(Math.max(Math.min(W / designW, H / designH), 0.45), 1.3);
+    const NODE_R  = 22 * scale;
+    const RECT_W  = 64 * scale;
+    const RECT_H  = 36 * scale;
+    const NODE_FS = Math.round(11 * scale);
+    const LSP_FS  = Math.max(9, Math.round(11 * scale));
+    const UTIL_FS = Math.max(10, Math.round(15 * scale));
+
+    const padX = Math.max(28, 55 * scale);
+    const padY = Math.max(30, 50 * scale);
     const colW = (W - padX * 2) / 4;
-    const rowH = (H - padY * 2 - 40) / 1;  // only 2 rows → single gap
+    const rowH = H - padY * 2 - 20;
     const colX = i => padX + i * colW;
-    const rowY = i => padY + i * rowH + 30;
+    const rowY = i => padY + i * rowH + 10;
 
     const pos = {};
     Object.keys(nodes).forEach(id => {
@@ -179,7 +300,7 @@ function TopologyMap({ nodes, links, lsps, slices }) {
         .attr("y", d => (d.s.y + d.t.y) / 2 - 7)
         .attr("text-anchor", "middle")
         .attr("fill", d => d.state === "down" ? C.red : utilColor(d.util))
-        .attr("font-size", "17px").attr("font-family", "monospace").attr("font-weight", "bold")
+        .attr("font-size", UTIL_FS + "px").attr("font-family", "monospace").attr("font-weight", "bold")
         .text(d => d.state === "down" ? "DOWN" : `${d.util.toFixed(0)}%`);
 
     // 3. LSP overlay paths — one routed polyline per LSP (slice A + B)
@@ -226,7 +347,7 @@ function TopologyMap({ nodes, links, lsps, slices }) {
         })
         .attr("text-anchor", "middle")
         .attr("fill", d => SLICE_COLOR[Object.values(slices || {}).find(s => s.lsp === d.id)?.id] || C.purple)
-        .attr("font-size", "11px")
+        .attr("font-size", LSP_FS + "px")
         .attr("font-family", "monospace")
         .attr("font-weight", "700")
         .text(d => {
@@ -239,8 +360,7 @@ function TopologyMap({ nodes, links, lsps, slices }) {
       .append("g").attr("class", "node")
       .attr("transform", d => `translate(${d.x},${d.y})`);
 
-    const NODE_R = 22;
-    const RECT_W = 64, RECT_H = 36;
+    // NODE_R, RECT_W, RECT_H are computed earlier with `scale`
 
     nodeGroups.each(function (d) {
       const style = ROLE_STYLE[d.role] || ROLE_STYLE.edge;
@@ -291,10 +411,10 @@ function TopologyMap({ nodes, links, lsps, slices }) {
         .attr("text-anchor", "middle")
         .attr("dominant-baseline", "middle")
         .attr("fill", style.label)
-        .attr("font-size", d.role === "ran" || d.role === "upf" ? "10px" : "11px")
+        .attr("font-size", (d.role === "ran" || d.role === "upf" ? Math.max(9, NODE_FS - 1) : NODE_FS) + "px")
         .attr("font-weight", "700")
         .attr("font-family", "monospace")
-        .attr("y", d.role === "upf" ? 14 : (d.role === "ran" ? 0 : 0))
+        .attr("y", d.role === "upf" ? RECT_H / 2 - 8 : 0)
         .text(d.id);
     });
 
@@ -1036,46 +1156,69 @@ function OperationsTab({ state, events, agentRunning, wsStatus, onToggleAgent, o
   const alarms = state.alarms || [];
   const pendingProposals = proposals.filter(p => p.status === "pending").length;
 
-  return (
-    <div style={{ display: "flex", height: "100%", gap: 12 }}>
-      {/* LEFT 60% */}
-      <div style={{ width: "60%", display: "flex", flexDirection: "column", gap: 12, minHeight: 0 }}>
-        {/* TOP: Topology + Alarms sidebar */}
-        <div style={{ height: "38%", display: "flex", gap: 12, flexShrink: 0 }}>
-          <Panel title="Network Topology" style={{ flex: 1 }}>
-            <TopologyMap nodes={state.nodes || {}} links={state.links || {}} lsps={state.lsps || {}} slices={state.slices || {}} />
-          </Panel>
-          <div style={{ width: 210, display: "flex", flexDirection: "column", gap: 8, flexShrink: 0 }}>
-            <div style={{ background: C.panel, border: `1px solid ${C.border}`, borderRadius: 8, padding: "9px 12px", display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
-              <div style={{ width: 8, height: 8, borderRadius: "50%", background: wsStatus === "connected" ? C.green : C.red, boxShadow: `0 0 8px ${wsStatus === "connected" ? C.green : C.red}55` }} />
-              <span style={{ fontSize: 11, color: C.text, fontWeight: 600 }}>{agentRunning ? "Agent Running" : "Agent Stopped"}</span>
-              <button onClick={onToggleAgent} style={{ marginLeft: "auto", padding: "3px 9px", borderRadius: 5, fontSize: 10, fontWeight: 700, background: agentRunning ? C.red + "18" : C.green + "18", border: `1px solid ${agentRunning ? C.red + "44" : C.green + "44"}`, color: agentRunning ? C.red : C.green, cursor: "pointer" }}>
-                {agentRunning ? "⏹ Stop" : "▶ Start"}
-              </button>
-            </div>
-            <Panel title="LSPs" style={{ flex: 1 }}>
-              {Object.entries(state.lsps || {}).length === 0 ? (
-                <div style={{ fontSize: 11, color: C.muted, textAlign: "center", paddingTop: 8 }}>No LSP data</div>
-              ) : Object.entries(state.lsps || {}).map(([id, l], i) => (
-                <div key={id} style={{ padding: "5px 0", borderBottom: `1px solid ${C.border}22`, display: "flex", flexDirection: "column", gap: 2 }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                    <span style={{ fontSize: 10, fontWeight: 700, fontFamily: "monospace", color: C.blue }}>{id}</span>
-                    <span style={{ fontSize: 9, padding: "1px 5px", borderRadius: 3, background: l.state === "up" ? C.green + "12" : C.red + "18", color: l.state === "up" ? C.green : C.red, fontFamily: "monospace" }}>{l.state || "up"}</span>
-                  </div>
-                  <div style={{ fontSize: 10, color: C.muted, fontFamily: "monospace" }}>{(l.path || []).join(" → ")}</div>
-                  {l.bandwidth_gbps && <div style={{ fontSize: 9, color: C.muted }}>{l.bandwidth_gbps}Gbps</div>}
-                </div>
-              ))}
-            </Panel>
-          </div>
-        </div>
-        {/* CONTROLS SLIM BAR */}
-        <ControlsBar onAnalyze={onAnalyze} onAction={onAction} />
+  // v2 demo: hide legacy v1 customer LSPs from the Active LSPs sidebar so
+  // the slice narrative stays crisp. The data is still present in /api/state
+  // and still exercised by test_e2e_baseline — this is a display filter only.
+  const visibleLsps = Object.entries(state.lsps || {}).filter(
+    ([id]) => id.startsWith("LSP-") || id === "lsp-mgmt"
+  );
 
-        {/* BOTTOM: Config + Alarms/Emails */}
-        <div style={{ flex: 1, display: "flex", gap: 12, minHeight: 0 }}>
-          {/* Config Proposals */}
-          <Panel title="Config Proposals" badge={pendingProposals} style={{ flex: 1 }}>
+  // ─── Inner pane components (kept inline so they close over handlers) ───
+  const TopologyPane = (
+    <Panel title="Network Topology" style={{ flex: 1, height: "100%" }}>
+      <TopologyMap nodes={state.nodes || {}} links={state.links || {}} lsps={state.lsps || {}} slices={state.slices || {}} />
+    </Panel>
+  );
+
+  const RightSidebarPane = (
+    <div style={{ display: "flex", flexDirection: "column", gap: 8, height: "100%", minHeight: 0 }}>
+      <div style={{ background: C.panel, border: `1px solid ${C.border}`, borderRadius: 8, padding: "9px 12px", display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+        <div style={{ width: 8, height: 8, borderRadius: "50%", background: wsStatus === "connected" ? C.green : C.red, boxShadow: `0 0 8px ${wsStatus === "connected" ? C.green : C.red}55` }} />
+        <span style={{ fontSize: 11, color: C.text, fontWeight: 600 }}>{agentRunning ? "Agent Running" : "Agent Stopped"}</span>
+        <button onClick={onToggleAgent} style={{ marginLeft: "auto", padding: "3px 9px", borderRadius: 5, fontSize: 10, fontWeight: 700, background: agentRunning ? C.red + "18" : C.green + "18", border: `1px solid ${agentRunning ? C.red + "44" : C.green + "44"}`, color: agentRunning ? C.red : C.green, cursor: "pointer" }}>
+          {agentRunning ? "⏹ Stop" : "▶ Start"}
+        </button>
+      </div>
+      <Panel title="Active LSPs" style={{ flex: 1, minHeight: 0 }}>
+        {visibleLsps.length === 0 ? (
+          <div style={{ fontSize: 11, color: C.muted, textAlign: "center", paddingTop: 8 }}>No LSP data</div>
+        ) : visibleLsps.map(([id, l]) => (
+          <div key={id} style={{ padding: "5px 0", borderBottom: `1px solid ${C.border}22`, display: "flex", flexDirection: "column", gap: 2 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <span style={{ fontSize: 10, fontWeight: 700, fontFamily: "monospace", color: C.blue }}>{id}</span>
+              <span style={{ fontSize: 9, padding: "1px 5px", borderRadius: 3, background: l.state === "up" ? C.green + "12" : C.red + "18", color: l.state === "up" ? C.green : C.red, fontFamily: "monospace" }}>{l.state || "up"}</span>
+            </div>
+            <div style={{ fontSize: 10, color: C.muted, fontFamily: "monospace" }}>{(l.path || []).join(" → ")}</div>
+            {l.bandwidth_gbps && <div style={{ fontSize: 9, color: C.muted }}>{l.bandwidth_gbps}Gbps</div>}
+          </div>
+        ))}
+      </Panel>
+    </div>
+  );
+
+  const AlarmsPane = (
+    <Panel title="Alarms" badge={alarms.filter(a => a.severity === "critical").length} style={{ height: "100%", minHeight: 0 }}>
+      {alarms.length === 0 ? (
+        <div style={{ fontSize: 11, color: C.muted, textAlign: "center", paddingTop: 8 }}>No active alarms</div>
+      ) : alarms.slice(-5).map((a, i) => (
+        <div key={i} style={{ padding: "4px 0", borderBottom: i < Math.min(alarms.length, 5) - 1 ? `1px solid ${C.border}` : "none", display: "flex", gap: 6, alignItems: "start" }}>
+          <span style={{ fontSize: 9, fontWeight: 700, padding: "1px 5px", borderRadius: 3, background: (sevColor[a.severity] || C.yellow) + "18", color: sevColor[a.severity] || C.yellow, fontFamily: "monospace", flexShrink: 0, marginTop: 1 }}>{(a.severity || "warn").slice(0,4).toUpperCase()}</span>
+          <span style={{ fontSize: 11, color: C.text, lineHeight: 1.4 }}>{a.description || a.message}</span>
+        </div>
+      ))}
+    </Panel>
+  );
+
+  const EmailsPane = (
+    <Panel title="📧 Email Outbox" badge={emails.length} style={{ height: "100%", minHeight: 0 }}>
+      {emails.length === 0 ? (
+        <div style={{ fontSize: 11, color: C.muted, textAlign: "center", paddingTop: 8 }}>No queued emails</div>
+      ) : emails.map(e => <EmailCard key={e.id} email={e} onEdit={() => setEmailModal(e)} />)}
+    </Panel>
+  );
+
+  const ConfigProposalsPane = (
+    <Panel title="Config Proposals" badge={pendingProposals} style={{ height: "100%", minHeight: 0 }}>
             {proposals.length === 0 ? (
               <div style={{ fontSize: 11, color: C.muted, textAlign: "center", paddingTop: 12 }}>No proposals</div>
             ) : proposals.map(cfg => (
@@ -1109,33 +1252,42 @@ function OperationsTab({ state, events, agentRunning, wsStatus, onToggleAgent, o
                 )}
               </div>
             ))}
-          </Panel>
+    </Panel>
+  );
 
-          {/* Alarms + Emails */}
-          <div style={{ width: "45%", display: "flex", flexDirection: "column", gap: 12, minHeight: 0 }}>
-            <Panel title="Alarms" badge={alarms.filter(a => a.severity === "critical").length} style={{ flexShrink: 0, height: 160 }}>
-              {alarms.length === 0 ? (
-                <div style={{ fontSize: 11, color: C.muted, textAlign: "center", paddingTop: 8 }}>No active alarms</div>
-              ) : alarms.slice(-5).map((a, i) => (
-                <div key={i} style={{ padding: "4px 0", borderBottom: i < alarms.length - 1 ? `1px solid ${C.border}` : "none", display: "flex", gap: 6, alignItems: "start" }}>
-                  <span style={{ fontSize: 9, fontWeight: 700, padding: "1px 5px", borderRadius: 3, background: (sevColor[a.severity] || C.yellow) + "18", color: sevColor[a.severity] || C.yellow, fontFamily: "monospace", flexShrink: 0, marginTop: 1 }}>{(a.severity || "warn").slice(0,4).toUpperCase()}</span>
-                  <span style={{ fontSize: 11, color: C.text, lineHeight: 1.4 }}>{a.description || a.message}</span>
-                </div>
-              ))}
-            </Panel>
-            <Panel title="📧 Email Outbox" badge={emails.length} style={{ flex: 1 }}>
-              {emails.length === 0 ? (
-                <div style={{ fontSize: 11, color: C.muted, textAlign: "center", paddingTop: 8 }}>No queued emails</div>
-              ) : emails.map(e => <EmailCard key={e.id} email={e} onEdit={() => setEmailModal(e)} />)}
-            </Panel>
+  const AgentLogPane = (
+    <Panel title="Agent Reasoning Log" style={{ height: "100%", minHeight: 0, padding: 0 }}>
+      <AgentLogPanel events={events} onOpenModal={() => setLogModalOpen(true)} />
+    </Panel>
+  );
+
+  return (
+    <div style={{ height: "100%", display: "flex", flexDirection: "column", minHeight: 0 }}>
+      <Split direction="horizontal" defaultSizes={[62, 38]}>
+        {/* LEFT — topology / controls / config+alarms+emails */}
+        <Split direction="vertical" defaultSizes={[44, 12, 44]}>
+          {/* Top row: topology + right sidebar (status + LSPs) */}
+          <Split direction="horizontal" defaultSizes={[74, 26]}>
+            {TopologyPane}
+            {RightSidebarPane}
+          </Split>
+          {/* Controls bar — fixed-ish slim row (still inside a Split pane so
+              operator can squeeze it if they want more topology height) */}
+          <div style={{ height: "100%", display: "flex", alignItems: "center" }}>
+            <ControlsBar onAnalyze={onAnalyze} onAction={onAction} />
           </div>
-        </div>
-      </div>
-
-      {/* RIGHT 40%: Agent Log */}
-      <Panel title="Agent Reasoning Log" style={{ width: "40%", flexShrink: 0, padding: 0 }}>
-        <AgentLogPanel events={events} onOpenModal={() => setLogModalOpen(true)} />
-      </Panel>
+          {/* Bottom row: proposals on left, alarms+emails on right */}
+          <Split direction="horizontal" defaultSizes={[58, 42]}>
+            {ConfigProposalsPane}
+            <Split direction="vertical" defaultSizes={[30, 70]}>
+              {AlarmsPane}
+              {EmailsPane}
+            </Split>
+          </Split>
+        </Split>
+        {/* RIGHT — full-height agent reasoning log */}
+        {AgentLogPane}
+      </Split>
 
       {/* Modals */}
       {logModalOpen && <AgentLogModal events={events} onClose={() => setLogModalOpen(false)} />}
