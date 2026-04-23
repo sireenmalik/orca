@@ -1,0 +1,11 @@
+# ORCA Config Proposal — R1
+# Generated: 2026-04-23T11:24:19.014098Z
+# Incident: CRITICAL SECURITY BREACH: Revert unauthorized NETCONF changes from 10.0.3.44 - remove rogue SNMP community and permissive ACL to restore approved security baseline
+# Branch: cfg/R1-20260423-112418
+
+configure router isis 0
+    interface "unknown"
+-       metric ?
++       metric ?
+    exit
+exit
