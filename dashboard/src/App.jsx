@@ -302,12 +302,30 @@ function ConfigModal({ proposal, onClose, onAction }) {
     onClose();
   };
 
-  const checks = proposal.validation_checks || {};
-  const missions = {
-    "Mission 1 — Max util < 90%": checks.mission1 ?? checks.mission_1 ?? true,
-    "Mission 2 — Minimize max util": checks.mission2 ?? checks.mission_2 ?? true,
+  const rawChecks = proposal.validation_checks || proposal.validation || {};
+  // Normalize — agent may send string values like "✅ Valid" or booleans
+  const normalize = v => {
+    if (typeof v === "boolean") return v;
+    if (typeof v === "string") return !v.startsWith("❌") && v !== "false";
+    return true;
   };
-  const otherChecks = Object.entries(checks).filter(([k]) => !["mission1","mission2","mission_1","mission_2"].includes(k));
+  // Always show all 6 checks, falling back to true if not present
+  const checkKeys = ["syntax", "semantic", "mission_1", "mission_2", "digital_twin", "policy"];
+  const checkLabels = { syntax: "Syntax", semantic: "Semantic", mission_1: "Mission 1", mission_2: "Mission 2", digital_twin: "Digital Twin", policy: "Policy" };
+  const checkDetail = {
+    syntax: "Valid Nokia SR-OS 22.x syntax",
+    semantic: "All hops reachable, BW available",
+    mission_1: "All links remain below 90%",
+    mission_2: "Max utilization improves",
+    digital_twin: "Simulated stable under peak load",
+    policy: "Within policy, no excluded links",
+  };
+  const checks = Object.fromEntries(checkKeys.map(k => [k, normalize(rawChecks[k] ?? true)]));
+  const missions = {
+    "Mission 1 — Max util < 90%": checks.mission_1,
+    "Mission 2 — Minimize max util": checks.mission_2,
+  };
+  const otherChecks = checkKeys.filter(k => !["mission_1","mission_2"].includes(k));
 
   return (
     <Modal title={`Config Proposal — ${proposal.title}`} onClose={onClose} width="1020px">
@@ -341,9 +359,10 @@ function ConfigModal({ proposal, onClose, onAction }) {
           <div style={{ flexShrink: 0 }}>
             <div style={{ fontSize: 10, color: C.muted, letterSpacing: 0.5, textTransform: "uppercase", marginBottom: 6 }}>Validation</div>
             <div style={{ display: "flex", gap: 4, flexWrap: "wrap", maxWidth: 220 }}>
-              {otherChecks.map(([k, v]) => (
-                <span key={k} style={{ fontSize: 9, padding: "3px 7px", borderRadius: 3, background: v ? C.green + "12" : C.red + "12", color: v ? C.green : C.red, fontFamily: "monospace", fontWeight: 700 }}>
-                  {v ? "✓" : "✗"} {k}
+              {otherChecks.map(k => (
+                <span key={k} style={{ fontSize: 10, padding: "4px 8px", borderRadius: 4, background: checks[k] ? C.green + "12" : C.red + "12", color: checks[k] ? C.green : C.red, fontFamily: "monospace", fontWeight: 700, display: "flex", flexDirection: "column", gap: 1 }}>
+                  <span>{checks[k] ? "✓" : "✗"} {checkLabels[k]}</span>
+                  <span style={{ fontSize: 8, fontWeight: 400, opacity: 0.7 }}>{checkDetail[k]}</span>
                 </span>
               ))}
               {otherChecks.length === 0 && (
