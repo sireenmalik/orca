@@ -109,7 +109,7 @@ function TopologyMap({ nodes, links }) {
     svg.append("g").selectAll("text").data(linkData).enter().append("text")
       .attr("x", d => (d.s.x + d.t.x) / 2).attr("y", d => (d.s.y + d.t.y) / 2 - 7)
       .attr("text-anchor", "middle").attr("fill", d => d.state === "down" ? C.red : utilColor(d.util))
-      .attr("font-size", "13px").attr("font-family", "monospace").attr("font-weight", "bold")
+      .attr("font-size", "15px").attr("font-family", "monospace").attr("font-weight", "bold")
       .text(d => d.state === "down" ? "DOWN" : `${d.util.toFixed(0)}%`);
     svg.append("g").selectAll("circle").data(nodeData).enter().append("circle")
       .attr("cx", d => d.x).attr("cy", d => d.y).attr("r", nodeR + 8).attr("fill", "none")
@@ -183,7 +183,7 @@ const LogEntry = memo(function LogEntry({ entry }) {
 // ─── AGENT LOG PANEL ──────────────────────────────────────────────────────────
 function AgentLogPanel({ events, onOpenModal }) {
   const [filter, setFilter] = useState("all");
-  const bottomRef = useRef(null);
+  const containerRef = useRef(null);
   const prevLenRef = useRef(0);
 
   const filtered = useMemo(() => {
@@ -195,8 +195,13 @@ function AgentLogPanel({ events, onOpenModal }) {
 
   useLayoutEffect(() => {
     const meaningful = events.filter(e => e.type !== "state_update");
-    if (meaningful.length > prevLenRef.current) {
-      bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    if (containerRef.current && meaningful.length > prevLenRef.current) {
+      const el = containerRef.current;
+      // only auto-scroll if user is already within 100px of the bottom;
+      // otherwise leave scroll position alone so they can read
+      if (el.scrollTop + el.clientHeight > el.scrollHeight - 100) {
+        el.scrollTop = el.scrollHeight;
+      }
     }
     prevLenRef.current = meaningful.length;
   }, [events]);
@@ -209,9 +214,8 @@ function AgentLogPanel({ events, onOpenModal }) {
         ))}
         <button onClick={onOpenModal} style={{ marginLeft: "auto", padding: "3px 8px", borderRadius: 4, fontSize: 9, fontWeight: 700, cursor: "pointer", background: "rgba(255,255,255,0.03)", border: `1px solid ${C.border}`, color: C.muted }}>⤢ Expand</button>
       </div>
-      <div style={{ flex: 1, overflow: "auto", padding: "0 12px 12px" }}>
+      <div ref={containerRef} style={{ flex: 1, overflow: "auto", padding: "0 12px 12px" }}>
         {filtered.map((e, i) => <LogEntry key={i} entry={e} />)}
-        <div ref={bottomRef} />
       </div>
     </div>
   );
