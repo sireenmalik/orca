@@ -673,9 +673,12 @@ function OperationsTab({ state, events, agentRunning, wsStatus, onToggleAgent, o
             {proposals.length === 0 ? (
               <div style={{ fontSize: 11, color: C.muted, textAlign: "center", paddingTop: 12 }}>No proposals</div>
             ) : proposals.map(cfg => (
-              <div key={cfg.id} onClick={() => setConfigModal(cfg)} style={{ background: "rgba(255,255,255,0.02)", border: `1px solid ${C.border}`, borderRadius: 8, padding: 12, marginBottom: 8, cursor: "pointer", borderLeft: `3px solid ${C.blue}` }}>
+              <div key={cfg.id} onClick={() => setConfigModal(cfg)} style={{ background: "rgba(255,255,255,0.02)", border: `1px solid ${C.border}`, borderRadius: 8, padding: 12, marginBottom: 8, cursor: "pointer", borderLeft: `3px solid ${cfg.security ? C.red : C.blue}` }}>
                 <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
-                  <span style={{ fontSize: 13, fontWeight: 600, color: C.text }}>{cfg.title}</span>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    {cfg.security && <span style={{ fontSize: 9, padding: "1px 5px", borderRadius: 3, background: C.red + "18", color: C.red, fontFamily: "monospace", fontWeight: 700 }}>SECURITY</span>}
+                    <span style={{ fontSize: 13, fontWeight: 600, color: C.text }}>{cfg.title}</span>
+                  </div>
                   <span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 4, background: C.yellow + "18", color: C.yellow, fontFamily: "monospace", fontWeight: 700 }}>{cfg.status}</span>
                 </div>
                 <div style={{ fontSize: 11, color: C.muted, marginBottom: 8, lineHeight: 1.5 }}>{cfg.reason}</div>
@@ -859,16 +862,50 @@ function SecurityTab({ events }) {
     return () => clearInterval(t);
   }, []);
 
-  // Also pick up security_alert events from WebSocket
+  // Listen for both security_alert and security_alarm
   useEffect(() => {
-    const sec = events.filter(e => e.type === "security_alert").map(e => e.data?.alert).filter(Boolean);
-    if (sec.length > 0) setAlerts(prev => {
-      const ids = new Set(prev.map(a => a.id));
-      return [...prev, ...sec.filter(a => !ids.has(a.id))];
-    });
+    const sec = events
+      .filter(e => e.type === "security_alert" || e.type === "security_alarm")
+      .map(e => e.data?.alert || (e.data ? {
+        id: `ws-${e.timestamp || Date.now()}`,
+        timestamp: e.timestamp,
+        node: e.data.node || "?",
+        severity: "critical",
+        type: "unauthorized_config_change",
+        detail: e.data.message || "",
+        status: "detected",
+        source: "gNMI",
+        provisional: true,
+      } : null))
+      .filter(Boolean);
+    if (sec.length > 0) {
+      setAlerts(prev => {
+        const merged = [...prev];
+        sec.forEach(a => {
+          const idx = merged.findIndex(e => e.node === a.node && (e.provisional || e.id === a.id));
+          if (idx >= 0) merged[idx] = { ...merged[idx], ...a };
+          else merged.push(a);
+        });
+        return merged;
+      });
+    }
   }, [events]);
 
-  // Merge live alerts with mock baseline for demo richness
+  // When revert proposed — update status
+  useEffect(() => {
+    const reverts = events.filter(e => e.type === "security_revert_proposed");
+    if (reverts.length > 0) {
+      setAlerts(prev => prev.map(a =>
+        a.provisional ? { ...a, status: "revert proposed — awaiting approval", provisional: false } : a
+      ));
+    }
+  }, [events]);
+
+  const handleReset = async () => {
+    await fetch(`${API}/api/demo/security-reset`, { method: "POST" });
+    setAlerts([]);
+  };
+
   const mockBase = [
     { ts: "14:18", sev: "high", src: "RADIUS", title: "Brute force auth pattern", detail: "847 failed auths from BRAS-02 in 5min", status: "investigating" },
     { ts: "13:55", sev: "medium", src: "BGP", title: "Anomalous prefix announcement", detail: "AS 64512 advertising 10.0.0.0/8", status: "quarantined" },
@@ -877,49 +914,72 @@ function SecurityTab({ events }) {
 
   const liveEvents = alerts.map(a => ({
     ts: a.timestamp ? new Date(a.timestamp).toLocaleTimeString() : "live",
-    sev: a.severity,
+    sev: a.severity || "critical",
     src: a.source || "gNMI",
-    title: a.type?.replace(/_/g, " ") || "Security alert",
-    detail: a.detail,
-    status: "active",
+    title: (a.type || "").replace(/_/g, " ") || a.node,
+    detail: a.detail || "",
+    status: a.status || "active",
+    threat_intel: a.threat_intel,
+    evidence_url: a.evidence_url,
     live: true,
   }));
 
   const allEvents = [...liveEvents, ...mockBase];
-  const counts = { critical: allEvents.filter(e => e.sev === "critical").length, high: allEvents.filter(e => e.sev === "high").length, medium: allEvents.filter(e => e.sev === "medium").length, low: allEvents.filter(e => e.sev === "low").length };
+  const counts = {
+    critical: allEvents.filter(e => e.sev === "critical").length,
+    high:     allEvents.filter(e => e.sev === "high").length,
+    medium:   allEvents.filter(e => e.sev === "medium").length,
+    low:      allEvents.filter(e => e.sev === "low").length,
+  };
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 12, height: "100%", overflow: "auto" }}>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10 }}>
+      <div style={{ display: "flex", gap: 10, alignItems: "stretch" }}>
         {[["CRITICAL", counts.critical, "#ef4444"], ["HIGH", counts.high, "#f97316"], ["MEDIUM", counts.medium, "#eab308"], ["LOW", counts.low, "#06b6d4"]].map(([l, n, c]) => (
-          <div key={l} style={{ background: C.panel, border: `1px solid ${C.border}`, borderRadius: 8, padding: "12px 14px", borderTop: `2px solid ${c}` }}>
+          <div key={l} style={{ flex: 1, background: C.panel, border: `1px solid ${C.border}`, borderRadius: 8, padding: "12px 14px", borderTop: `2px solid ${c}` }}>
             <div style={{ fontSize: 9, letterSpacing: 1, color: C.muted, marginBottom: 4 }}>{l}</div>
             <div style={{ fontSize: 24, fontWeight: 700, fontFamily: "monospace", color: c }}>{n}</div>
           </div>
         ))}
+        <button onClick={handleReset} style={{ padding: "0 16px", borderRadius: 8, fontSize: 11, fontWeight: 600, cursor: "pointer", background: "rgba(255,255,255,0.04)", border: `1px solid ${C.border}`, color: C.muted, flexShrink: 0, whiteSpace: "nowrap" }}>
+          🔄 Reset Demo
+        </button>
       </div>
       <Panel title="Security Events" style={{ flex: 1 }}>
         {allEvents.map((ev, i) => (
-          <div key={i} style={{ padding: "10px 0", borderBottom: `1px solid ${C.border}`, display: "grid", gridTemplateColumns: "52px 56px 1fr 80px", gap: 10, alignItems: "start" }}>
-            <span style={{ fontSize: 10, fontFamily: "monospace", color: ev.live ? C.red : C.muted }}>{ev.ts}</span>
-            <span style={{ fontSize: 9, fontWeight: 700, padding: "2px 6px", borderRadius: 3, textAlign: "center", background: sevColor[ev.sev] + "18", color: sevColor[ev.sev], textTransform: "uppercase", fontFamily: "monospace" }}>{ev.sev}</span>
-            <div>
-              <span style={{ fontSize: 9, padding: "1px 5px", borderRadius: 3, background: "rgba(255,255,255,0.04)", color: C.muted, marginRight: 6, fontFamily: "monospace" }}>{ev.src}</span>
-              <span style={{ fontSize: 12, fontWeight: 600, color: C.text }}>{ev.title}</span>
-              {ev.live && <span style={{ fontSize: 9, padding: "1px 5px", borderRadius: 3, background: C.red + "18", color: C.red, fontFamily: "monospace", marginLeft: 6 }}>LIVE</span>}
-              <div style={{ fontSize: 11, color: C.muted, marginTop: 2, lineHeight: 1.3 }}>{ev.detail}</div>
+          <div key={i} style={{ padding: "10px 0", borderBottom: `1px solid ${C.border}` }}>
+            <div style={{ display: "grid", gridTemplateColumns: "52px 64px 1fr 120px", gap: 10, alignItems: "start" }}>
+              <span style={{ fontSize: 10, fontFamily: "monospace", color: ev.live ? C.red : C.muted }}>{ev.ts}</span>
+              <span style={{ fontSize: 9, fontWeight: 700, padding: "2px 6px", borderRadius: 3, textAlign: "center", background: sevColor[ev.sev] + "18", color: sevColor[ev.sev], textTransform: "uppercase", fontFamily: "monospace" }}>{ev.sev}</span>
+              <div>
+                <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 3 }}>
+                  <span style={{ fontSize: 9, padding: "1px 5px", borderRadius: 3, background: "rgba(255,255,255,0.04)", color: C.muted, fontFamily: "monospace" }}>{ev.src}</span>
+                  <span style={{ fontSize: 12, fontWeight: 600, color: C.text }}>{ev.title}</span>
+                  {ev.live && <span style={{ fontSize: 9, padding: "1px 5px", borderRadius: 3, background: C.red + "18", color: C.red, fontFamily: "monospace" }}>LIVE</span>}
+                </div>
+                <div style={{ fontSize: 11, color: C.muted, lineHeight: 1.4 }}>{ev.detail}</div>
+                {ev.threat_intel && (
+                  <div style={{ marginTop: 6, padding: "5px 8px", borderRadius: 4, background: "rgba(239,68,68,0.06)", border: `1px solid ${C.red}22`, fontSize: 10, color: "#fca5a5", lineHeight: 1.5 }}>
+                    🔴 {ev.threat_intel}
+                  </div>
+                )}
+                {ev.evidence_url && (
+                  <a href={ev.evidence_url} target="_blank" rel="noreferrer" style={{ display: "inline-block", marginTop: 5, fontSize: 10, color: C.blue, textDecoration: "none" }}>
+                    📁 Evidence PR → view on GitHub
+                  </a>
+                )}
+              </div>
+              <span style={{ fontSize: 9, padding: "2px 6px", borderRadius: 3, textAlign: "center", fontFamily: "monospace",
+                background: ev.status === "active" ? C.red + "12" : ev.status?.includes("revert") ? C.yellow + "12" : ev.status === "blocked" ? C.green + "12" : "rgba(255,255,255,0.04)",
+                color: ev.status === "active" ? C.red : ev.status?.includes("revert") ? C.yellow : ev.status === "blocked" ? C.green : C.muted,
+              }}>{ev.status}</span>
             </div>
-            <span style={{ fontSize: 9, padding: "2px 6px", borderRadius: 3, textAlign: "center", fontFamily: "monospace", background: ev.status === "blocked" ? C.green + "12" : ev.status === "active" ? C.red + "12" : ev.status === "investigating" ? C.yellow + "12" : "rgba(255,255,255,0.04)", color: ev.status === "blocked" ? C.green : ev.status === "active" ? C.red : ev.status === "investigating" ? C.yellow : C.muted }}>{ev.status}</span>
           </div>
         ))}
       </Panel>
     </div>
   );
 }
-
-// ─── CHURN TAB ────────────────────────────────────────────────────────────────
-const churnHistory = [{ m: "Nov", v: 4.1 }, { m: "Dec", v: 3.8 }, { m: "Jan", v: 3.5 }, { m: "Feb", v: 3.9 }, { m: "Mar", v: 3.2 }, { m: "Apr", v: 3.4 }];
-const churnForecast = [{ m: "May", v: 3.2, lo: 2.8, hi: 3.6 }, { m: "Jun", v: 3.5, lo: 2.9, hi: 4.1 }, { m: "Jul", v: 3.1, lo: 2.4, hi: 3.8 }, { m: "Aug", v: 2.8, lo: 2.0, hi: 3.6 }];
 
 function ChurnTab({ events }) {
   const [risks, setRisks] = useState({});
@@ -1278,3 +1338,4 @@ export default function App() {
     </div>
   );
 }
+
