@@ -210,3 +210,79 @@ Or check browser at `http://{IP}`.
 /var/log/orca-init.log      cloud-init build log
 /var/log/orca.log           app start marker
 ```
+
+---
+
+## SSH Direct Access (use this — stop rebuilding droplets)
+
+### Setup at start of every session (30 seconds)
+
+```bash
+# Step 1 — install SSH and restore deploy key
+curl -s https://raw.githubusercontent.com/sireenmalik/orca/main/scripts/setup_ssh.sh \
+  -H "Authorization: token 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" | bash
+
+# OR fetch via GitHub API and run locally:
+curl -s -H "Authorization: token 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" \
+  "https://api.github.com/repos/sireenmalik/orca/contents/scripts/setup_ssh.sh" | \
+  python3 -c "import json,sys,base64; print(base64.b64decode(json.load(sys.stdin)['content']).decode())" \
+  > /tmp/setup_ssh.sh && bash /tmp/setup_ssh.sh
+```
+
+This installs openssh-client, writes the deploy key to `~/.ssh/orca_deploy_key`, and prints `ORCA_IP`.
+
+### SSH key details
+
+| Item | Value |
+|------|-------|
+| Key name | `orca-ci-key` |
+| DO key ID | `55825147` |
+| Fingerprint | `87:cc:eb:69:f5:a1:a6:95:2b:fe:44:d0:58:8f:05:3c` |
+| Stored in repo | `scripts/setup_ssh.sh` (base64 embedded) |
+
+**All new droplets must include this key ID**: `[54443503, 53273622, 55825147]`
+
+### Common SSH commands
+
+```bash
+# Patch — the only deploy method for code changes (15 seconds)
+ssh -i ~/.ssh/orca_deploy_key -o StrictHostKeyChecking=no root@$ORCA_IP \
+  'cd /opt/orca && git pull origin main && docker-compose restart && echo DONE'
+
+# Check container status
+ssh -i ~/.ssh/orca_deploy_key -o StrictHostKeyChecking=no root@$ORCA_IP \
+  'docker ps && docker logs orca_api_1 --tail 20'
+
+# Check build log (during cloud-init)
+ssh -i ~/.ssh/orca_deploy_key -o StrictHostKeyChecking=no root@$ORCA_IP \
+  'tail -30 /var/log/orca-init.log'
+
+# Full rebuild (only when Dockerfile/package.json changed)
+ssh -i ~/.ssh/orca_deploy_key -o StrictHostKeyChecking=no root@$ORCA_IP \
+  'cd /opt/orca && docker-compose down && docker build -f Dockerfile.api -t orca_api:latest . 2>&1 | tail -5 && docker-compose --env-file .env up -d && echo DONE'
+
+# Check health
+ssh -i ~/.ssh/orca_deploy_key -o StrictHostKeyChecking=no root@$ORCA_IP \
+  'curl -s localhost:8000/api/health'
+
+# Interactive shell
+ssh -i ~/.ssh/orca_deploy_key -o StrictHostKeyChecking=no root@$ORCA_IP
+```
+
+### Helper function — set ORCA_IP automatically
+
+```bash
+ORCA_IP=$(curl -s "https://api.digitalocean.com/v2/droplets?tag_name=orca" \
+  -H "Authorization: Bearer dop_v1_60651458efb36ecb98f382f8f8daa19a086bf4f8444f93ad98d84541258b174d" | \
+  python3 -c "
+import json,sys
+drops=json.load(sys.stdin).get('droplets',[])
+pub=[n for n in drops[0]['networks']['v4'] if n['type']=='public'] if drops else []
+print(pub[0]['ip_address'] if pub else 'NOT_FOUND')
+")
+echo "ORCA at: $ORCA_IP"
+```
+
+### Why SSH matters
+
+Without SSH, every code fix requires spinning a new droplet (10 min). With SSH, a patch takes 15 seconds. The sandbox has no SSH client by default — the setup script installs it. Do this at the start of every session before any deployment work.
