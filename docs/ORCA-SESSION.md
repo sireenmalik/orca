@@ -48,6 +48,30 @@ for d in json.load(sys.stdin)['droplets']:
 
 ---
 
+## Step 0 — SSH Setup (do this first, every session)
+
+```bash
+# Installs openssh-client, writes deploy key, prints ORCA_IP
+curl -s -H "Authorization: token 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" \
+  "https://api.github.com/repos/sireenmalik/orca/contents/scripts/setup_ssh.sh" | \
+  python3 -c "import json,sys,base64; print(base64.b64decode(json.load(sys.stdin)['content']).decode())" \
+  > /tmp/setup_ssh.sh && bash /tmp/setup_ssh.sh
+```
+
+Then patch the server in 15 seconds:
+```bash
+ssh -i ~/.ssh/orca_deploy_key -o StrictHostKeyChecking=no root@$ORCA_IP \
+  'cd /opt/orca && git pull origin main && docker-compose restart && echo DONE'
+```
+
+Check logs:
+```bash
+ssh -i ~/.ssh/orca_deploy_key -o StrictHostKeyChecking=no root@$ORCA_IP \
+  'docker ps && docker logs orca_api_1 --tail 20'
+```
+
+**SSH key ID for new droplets: `55825147` (orca-ci-key)** — add to `[54443503, 53273622, 55825147]`
+
 ## How to Start a Session
 
 ### Step 1 — Fetch live files (always do this, never use memory)
