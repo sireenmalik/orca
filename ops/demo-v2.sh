@@ -11,6 +11,12 @@ MAX_WAIT_S=20
 echo "→ stopping v1 (if running)"
 cd "$V1_DIR" && docker-compose down 2>/dev/null || true
 
+# Also tear down any stale v2 container — docker-compose 1.29 hits a
+# KeyError: 'ContainerConfig' bug on recreate when the image was rebuilt
+# since the container was last started. Down + up dodges it.
+echo "→ tearing down any stale v2 container"
+cd "$V2_DIR" && docker-compose down 2>/dev/null || true
+
 echo "→ starting v2"
 cd "$V2_DIR" && docker-compose up -d
 
