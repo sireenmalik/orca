@@ -1,0 +1,11 @@
+# ORCA Config Proposal — R1
+# Generated: 2026-04-23T11:41:53.804482Z
+# Incident: Critical security breach detected - unauthorized SNMP community and ACL changes made via direct NETCONF push from IP 10.0.3.44. Must revert to approved Git baseline to remove management plane exposure and restore access controls.
+# Branch: cfg/R1-20260423-114152
+
+configure router isis 0
+    interface "unknown"
+-       metric ?
++       metric ?
+    exit
+exit
