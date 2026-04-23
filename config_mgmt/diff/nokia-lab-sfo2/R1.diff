@@ -1,0 +1,19 @@
+# ORCA Config Proposal — R1
+# Generated: 2026-04-23T09:04:48.595875Z
+# Incident: R1-R4 link failure has created permanent topology change. Current IGP metrics cause suboptimal routing and congestion. Need to increase metrics on high-utilization paths to better distribute traffic.
+# Branch: cfg/R1-20260423-090447
+
+configure router isis 0
+    interface "unknown"
+-       metric ?
++       metric ?
+    exit
+    interface "unknown"
+-       metric ?
++       metric ?
+    exit
+    interface "unknown"
+-       metric ?
++       metric ?
+    exit
+exit
