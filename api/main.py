@@ -245,7 +245,7 @@ async def get_churn_risk():
         base_prob = 1 / (1 + math.exp(-k * (risk_score - midpoint)))
         churn_prob = round(min(base_prob * segment_multiplier.get(meta["segment"], 1.0) * 100, 99), 1)
         band = "healthy" if risk_score <= 25 else "watch" if risk_score <= 55 else "at_risk" if risk_score <= 80 else "critical"
-        risks[lsp_id] = {**meta, "risk_score": risk_score, "risk_band": band,
+        risks[lsp_id] = {**meta, "lsp_id": lsp_id, "risk_score": risk_score, "risk_band": band,
                          "churn_probability_pct": churn_prob, "reroute_count": reroutes,
                          "breach_90_count": breach_90, "time_degraded_mins": time_degraded}
     return {"risks": risks}
@@ -546,6 +546,7 @@ async def debug_env():
 dashboard_path = "/opt/orca/dashboard/dist"
 if os.path.exists(dashboard_path):
     app.mount("/", StaticFiles(directory=dashboard_path, html=True), name="static")
+
 
 
 
