@@ -144,13 +144,19 @@ const logTypeStyle = {
   agent_status: { bg: "#10b98118", color: C.green, label: "STATUS" },
   git_command: { bg: "#06b6d418", color: C.blue, label: "GIT" },
   pr_opened: { bg: "#8b5cf618", color: C.purple, label: "PR" },
-  agent_thinking: { bg: "#8b5cf618", color: C.purple, label: "THINK" },
+  netconf_push: { bg: "rgba(16,185,129,0.10)", color: C.green, label: "NETCONF" },
   state_update: { bg: "rgba(255,255,255,0.02)", color: C.muted, label: "STATE" },
 };
 
 const LogEntry = memo(function LogEntry({ entry }) {
   const s = logTypeStyle[entry.type] || logTypeStyle.status;
-  const msg = entry.message || entry.msg || JSON.stringify(entry.data || "");
+  // Agent wraps content in entry.data — extract the most useful field
+  const data = entry.data || {};
+  const msg = entry.message || entry.msg
+    || data.message || data.command || data.text
+    || (data.tool && data.inputs ? `${data.tool}(\n${JSON.stringify(data.inputs, null, 2)})` : null)
+    || (data.tool && data.result ? `${data.tool} → ${typeof data.result === "object" ? JSON.stringify(data.result) : data.result}` : null)
+    || (typeof data === "string" ? data : JSON.stringify(data));
   const ts = (() => {
     if (!entry.timestamp) return "";
     const t = entry.timestamp;
