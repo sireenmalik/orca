@@ -141,30 +141,72 @@ class ProposalAction(BaseModel):
 @app.post("/api/demo/inject-rogue-config")
 async def inject_rogue_config():
     """Inject unauthorized config change for security breach demo."""
+    import time as _time
     result = adapter.inject_rogue_config("R1")
-    # Add a security alarm to trigger ORCA detection
+    rogue_changes = result.get("changes", [])
+
+    # Add alarm to network state
     from agent.adapter import Alarm
-    import time
     alarm = Alarm(
-        id=f"sec-alarm-{int(time.time())}",
-        severity="critical",
-        node="R1",
+        id=f"sec-alarm-{int(_time.time())}",
+        severity="critical", node="R1",
         description="Security: Config drift detected on R1 — gNMI running config diverges from Git baseline"
     )
     adapter._alarms.append(alarm)
+
+    # Pre-populate _security_alerts immediately — don't wait for ORCA analyze
+    from agent.te_agent import _security_alerts
+    provisional_alert = {
+        "id": f"sec-{int(_time.time())}",
+        "timestamp": datetime.utcnow().isoformat(),
+        "node": "R1",
+        "severity": "critical",
+        "type": "unauthorized_config_change",
+        "detail": f"Rogue changes detected: {', '.join(ch.get('parameter','?') for ch in rogue_changes)} — source IP {result.get('source_ip','10.0.3.44')} via NETCONF direct push",
+        "classification": "management_plane_exposure",
+        "changes": rogue_changes,
+        "status": "detected — awaiting ORCA analysis",
+        "source": "gNMI config drift detection",
+        "provisional": True,
+    }
+    _security_alerts.append(provisional_alert)
+
+    # Broadcast security_alert (not security_alarm) so Security tab picks it up
     await manager.broadcast({
-        "type": "security_alarm", "timestamp": datetime.utcnow().isoformat(),
-        "data": {"node": "R1", "message": "Unauthorized config change detected on R1 — ORCA investigating"}
+        "type": "security_alert",
+        "timestamp": datetime.utcnow().isoformat(),
+        "data": {"alert": provisional_alert}
     })
     asyncio.create_task(_broadcast_state())
-    return {"success": True, "node": "R1", "changes": result.get("changes", []),
-            "message": "Rogue config injected — ORCA will detect on next analyze cycle"}
+    return {"success": True, "node": "R1", "changes": rogue_changes,
+            "message": "Rogue config injected — security alert raised, ORCA will analyze"}
 
 @app.post("/api/demo/clear-rogue-config")
 async def clear_rogue_config():
     """Clear injected rogue config."""
     adapter.clear_rogue_config()
     return {"success": True}
+
+@app.post("/api/demo/security-reset")
+async def security_reset():
+    """Full security demo reset — clear rogue config, alerts, proposals, alarms, network state."""
+    global adapter
+    # Clear rogue config
+    adapter.clear_rogue_config()
+    # Clear security alarms from adapter
+    adapter._alarms = [a for a in adapter._alarms if "Security" not in a.description and "drift" not in a.description]
+    # Clear security alerts store
+    from agent.te_agent import _security_alerts
+    _security_alerts.clear()
+    # Reset agent fault signature
+    agent.reset_fault_signature()
+    # Broadcast clean state
+    asyncio.create_task(_broadcast_state())
+    await manager.broadcast({
+        "type": "agent_status", "timestamp": datetime.utcnow().isoformat(),
+        "data": {"status": "reset", "message": "🔄 Security demo reset — network restored to clean baseline"}
+    })
+    return {"success": True, "message": "Security demo reset complete"}
 
 # ── Security alerts ───────────────────────────────────────────────────────────
 @app.get("/api/security-alerts")
@@ -501,5 +543,6 @@ async def debug_env():
 dashboard_path = "/opt/orca/dashboard/dist"
 if os.path.exists(dashboard_path):
     app.mount("/", StaticFiles(directory=dashboard_path, html=True), name="static")
+
 
 
