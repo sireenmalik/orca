@@ -723,7 +723,6 @@ class ORCAAgent:
                     drift = {"drift_detected": False, "node": node, "summary": f"No config drift detected on {node}"}
                 result = drift
             elif name == "raise_security_alert":
-                from datetime import datetime
                 import base64 as _b64, urllib.request as _ur, os as _os, json as _json
 
                 node      = inputs.get("node", "R1")
