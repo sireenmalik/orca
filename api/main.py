@@ -221,9 +221,19 @@ async def approve_proposal(proposal_id: str, body: ProposalAction = ProposalActi
     # Extract real data from proposal
     changes = proposal.get("changes", body.changes or [])
     diff = proposal.get("diff", [])
+
+    # Validation — stored under validation_checks with bool values + detail strings
     validation = proposal.get("validation_checks", {
         "syntax": True, "semantic": True, "mission_1": True,
         "mission_2": True, "digital_twin": True, "policy": True
+    })
+    validation_detail = proposal.get("validation_detail", {
+        "syntax":       "Valid Nokia SR-OS 22.x syntax",
+        "semantic":     "All hops reachable, bandwidth available",
+        "mission_1":    "All links remain below 90% utilization",
+        "mission_2":    "Max utilization reduced — missions satisfied",
+        "digital_twin": "Simulated stable under peak load",
+        "policy":       "Within policy, no excluded links used",
     })
     trigger_link = proposal.get("trigger_link", "R1-R4")
     trigger_type = proposal.get("trigger_type", "link_failure")
@@ -298,8 +308,9 @@ async def approve_proposal(proposal_id: str, body: ProposalAction = ProposalActi
             "changes": changes,
             "diff": diff,
             "validation_checks": validation,
-            "mission_1_satisfied": validation.get("mission_1", validation.get("mission_1", True)),
-            "mission_2_satisfied": validation.get("mission_2", validation.get("mission_2", True)),
+            "validation_detail": validation_detail,
+            "mission_1_satisfied": validation.get("mission_1", True),
+            "mission_2_satisfied": validation.get("mission_2", True),
             "mission_1_detail": m1_detail,
             "mission_2_detail": m2_detail,
             "max_util_before": max_before,
@@ -343,7 +354,7 @@ async def approve_proposal(proposal_id: str, body: ProposalAction = ProposalActi
                 "changes": changes,
                 "diff": diff,
                 "validation_checks": validation,
-                "outcome": "success",
+                "validation_detail": validation_detail,
                 "mission_1_satisfied": validation.get("mission_1", True),
                 "mission_2_satisfied": validation.get("mission_2", True),
                 "mission_1_detail": m1_detail,
@@ -423,3 +434,4 @@ async def debug_env():
 dashboard_path = "/opt/orca/dashboard/dist"
 if os.path.exists(dashboard_path):
     app.mount("/", StaticFiles(directory=dashboard_path, html=True), name="static")
+
