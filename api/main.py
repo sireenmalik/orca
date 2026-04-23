@@ -502,19 +502,34 @@ Actions taken:
         )
 
         # If this was a security revert, mark the linked alert as remediated
-        # so the Security tab stops showing it as "active".
-        if proposal.get("security") and proposal.get("alert_id"):
+        # so the Security tab stops showing it as "active". The proposal may
+        # come from two paths: raise_security_alert (carries alert_id + the
+        # security flag) or propose_config_change with a security-themed
+        # title (doesn't). Handle both — prefer alert_id; fall back to the
+        # most recent active alert on any router in the changes list.
+        title_lc = (proposal.get("title", "") or "").lower()
+        looks_security = (proposal.get("security")
+                          or "security" in title_lc
+                          or "revert" in title_lc
+                          or proposal.get("trigger_type") == "security_violation")
+        if looks_security:
             from agent.te_agent import _security_alerts
             alert_id = proposal.get("alert_id")
             remediated_alert = None
+            target_nodes = {ch.get("device") or ch.get("node") or ch.get("router")
+                            for ch in changes} - {None}
             for a in _security_alerts:
-                if a.get("id") == alert_id:
+                matches_id   = alert_id and a.get("id") == alert_id
+                matches_node = (not alert_id) and a.get("node") in target_nodes \
+                               and a.get("status") not in ("remediated", "resolved")
+                if matches_id or matches_node:
                     a["status"] = "remediated"
                     a["remediated_at"] = datetime.utcnow().isoformat()
                     a["remediation_pr_url"] = pr_url
                     a["remediation_pr_number"] = pr_number
                     remediated_alert = a
-                    break
+                    if matches_id:
+                        break  # exact match — stop
             if remediated_alert:
                 await manager.broadcast({
                     "type": "security_alert",
