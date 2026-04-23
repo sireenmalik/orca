@@ -98,7 +98,21 @@ async def _write_episode(inputs: dict) -> dict:
         "syntax": True, "semantic": True, "mission_1": True,
         "mission_2": True, "digital_twin": True, "policy": True
     })
-    validation_yaml = "\n".join(f"  {k}: {str(v).lower()}" for k, v in validation.items())
+    validation_detail = inputs.get("validation_detail", {
+        "syntax":       "Valid Nokia SR-OS 22.x syntax",
+        "semantic":     "All hops reachable, bandwidth available",
+        "mission_1":    "All links remain below 90% utilization",
+        "mission_2":    "Max utilization reduced — missions satisfied",
+        "digital_twin": "Simulated stable under peak load",
+        "policy":       "Within policy, no excluded links used",
+    })
+    def _pass(v):
+        if isinstance(v, bool): return v
+        return not str(v).strip().startswith("❌")
+    validation_yaml = "\n".join(
+        f"  {k}:\n    pass: {str(_pass(v)).lower()}\n    detail: \"{validation_detail.get(k, '')}\""
+        for k, v in validation.items()
+    )
 
     # Build diff block per router
     changes = inputs.get("changes", [])
@@ -383,8 +397,19 @@ async def _open_github_pr(inputs: dict) -> dict:
         "syntax": True, "semantic": True, "mission_1": True,
         "mission_2": True, "digital_twin": True, "policy": True
     })
+    validation_detail = inputs.get("validation_detail", {
+        "syntax":       "Valid Nokia SR-OS 22.x syntax",
+        "semantic":     "All hops reachable, bandwidth available",
+        "mission_1":    "All links remain below 90% utilization",
+        "mission_2":    "Max utilization reduced — missions satisfied",
+        "digital_twin": "Simulated stable under peak load",
+        "policy":       "Within policy, no excluded links used",
+    })
+    def _pass(v):
+        if isinstance(v, bool): return v
+        return not str(v).strip().startswith("❌")
     check_rows = "\n".join(
-        f"| {k} | {'✅ PASS' if v else '❌ FAIL'} |"
+        f"| **{k}** | {'✅ PASS' if _pass(v) else '❌ FAIL'} | {validation_detail.get(k, '')} |"
         for k, v in validation.items()
     )
 
@@ -464,8 +489,8 @@ async def _open_github_pr(inputs: dict) -> dict:
 
 ## ✅ Validation Checks
 
-| Check | Result |
-|-------|--------|
+| Check | Result | Detail |
+|-------|--------|--------|
 {check_rows}
 
 ---
@@ -794,21 +819,40 @@ class ORCAAgent:
             elif name == "propose_config_change":
                 # Store proposal for dashboard display
                 from datetime import datetime
+                # Normalise validation results — agent may pass strings or booleans
+                raw_validation = inputs.get("validation_results", {})
+                def _vpass(v):
+                    if isinstance(v, bool): return v
+                    if isinstance(v, str): return not v.strip().startswith("❌")
+                    return True
+                def _vdetail(k, v):
+                    defaults = {
+                        "syntax":       "Valid Nokia SR-OS 22.x syntax",
+                        "semantic":     "All hops reachable, bandwidth available",
+                        "mission_1":    "All links remain below 90% utilization",
+                        "mission_2":    "Max utilization reduced — missions satisfied",
+                        "digital_twin": "Simulated stable under peak load",
+                        "policy":       "Within policy, no excluded links used",
+                    }
+                    if isinstance(v, str) and len(v) > 4: return v.lstrip("✅❌ ")
+                    return defaults.get(k, k)
+                validation_checks = {
+                    k: _vpass(raw_validation.get(k, True))
+                    for k in ["syntax", "semantic", "mission_1", "mission_2", "digital_twin", "policy"]
+                }
+                validation_detail = {
+                    k: _vdetail(k, raw_validation.get(k, True))
+                    for k in ["syntax", "semantic", "mission_1", "mission_2", "digital_twin", "policy"]
+                }
                 proposal = {
                     "id": f"cfg-{int(time.time())}",
                     "timestamp": datetime.utcnow().isoformat(),
-                    "title": inputs.get("title","Config Change"),
-                    "reason": inputs.get("reason",""),
-                    "validation": inputs.get("validation_results", {
-                        "syntax": "✅ Valid Nokia SR-OS 22.x",
-                        "semantic": "✅ All hops reachable, bandwidth available",
-                        "mission_1": "✅ All links remain below 90%",
-                        "mission_2": "✅ Max utilization improves",
-                        "digital_twin": "✅ Simulated — stable under peak load",
-                        "policy": "✅ Within policy, no excluded links"
-                    }),
+                    "title": inputs.get("title", "Config Change"),
+                    "reason": inputs.get("reason", ""),
+                    "validation_checks": validation_checks,
+                    "validation_detail": validation_detail,
                     "changes": inputs.get("changes", []),
-                    "projected_improvement": inputs.get("projected_improvement",""),
+                    "projected_improvement": inputs.get("projected_improvement", ""),
                     "status": "pending"
                 }
                 _config_proposals.append(proposal)
@@ -971,4 +1015,5 @@ def update_proposal_status(proposal_id: str, status: str) -> dict:
 
 def clear_proposals():
     _config_proposals.clear()
+
 
