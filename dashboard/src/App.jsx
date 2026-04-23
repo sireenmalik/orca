@@ -89,59 +89,242 @@ function Modal({ title, onClose, children, width = "780px" }) {
 }
 
 // ─── TOPOLOGY ─────────────────────────────────────────────────────────────────
-function TopologyMap({ nodes, links }) {
+// v2 demo: 5-column layout — gNBs (RAN) → PEs → P core → PEs → UPFs.
+// Role → column index map drives x; top/bottom within a column is hard-coded
+// by node id so PE-01/P-02/PE-03/UPF-01 sit on the slice-A rail and
+// PE-02/P-01/PE-04/UPF-02 sit on the slice-B rail.
+const NODE_COLUMN = {
+  "gNB-1": 0, "gNB-2": 0,
+  "PE-01": 1, "PE-02": 1,
+  "P-02":  2, "P-01":  2,
+  "PE-03": 3, "PE-04": 3,
+  "UPF-01": 4, "UPF-02": 4,
+};
+const NODE_ROW = {
+  "gNB-1": 0, "PE-01": 0, "P-02": 0, "PE-03": 0, "UPF-01": 0,  // top rail = slice A
+  "gNB-2": 1, "PE-02": 1, "P-01": 1, "PE-04": 1, "UPF-02": 1,  // bottom rail = slice B
+};
+const ROLE_STYLE = {
+  ran:  { fill: "#d97706", stroke: "#f59e0b", shape: "rect",   label: C.text },  // amber
+  edge: { fill: "#1f6feb", stroke: C.accent,  shape: "circle", label: C.text },  // blue
+  core: { fill: "#0e4a9e", stroke: C.accent,  shape: "circle", label: C.text },  // dark blue
+  upf:  { fill: "#0891b2", stroke: C.blue,    shape: "rect",   label: C.text },  // cyan
+};
+const SLICE_COLOR = { "slice-A": "#a855f7", "slice-B": "#22c55e" };  // purple / green
+
+function TopologyMap({ nodes, links, lsps, slices }) {
   const wrapRef = useRef(null);
   const svgRef = useRef(null);
-  const linksKey = JSON.stringify(links);
-  const nodesKey = JSON.stringify(nodes);
+  const stateKey = JSON.stringify({ nodes, links, lsps, slices });
+
   const draw = useCallback(() => {
     if (!nodes || !links || !svgRef.current || !wrapRef.current) return;
-    const W = wrapRef.current.clientWidth || 400;
-    const H = wrapRef.current.clientHeight || 300;
+    const W = wrapRef.current.clientWidth || 600;
+    const H = wrapRef.current.clientHeight || 380;
     d3.select(svgRef.current).selectAll("*").remove();
     const svg = d3.select(svgRef.current).attr("width", W).attr("height", H);
-    const pad = Math.min(W, H) * 0.17;
-    const cx = W / 2, cy = H / 2;
-    const rx = W / 2 - pad, ry = H / 2 - pad;
-    const ring = ["PE-01","P-02","PE-03","PE-04","P-01","PE-02"];
+
+    // Layout
+    const padX = 60, padY = 50;
+    const colW = (W - padX * 2) / 4;
+    const rowH = (H - padY * 2 - 40) / 1;  // only 2 rows → single gap
+    const colX = i => padX + i * colW;
+    const rowY = i => padY + i * rowH + 30;
+
     const pos = {};
-    ring.forEach((id, i) => {
-      const a = -Math.PI / 2 + (2 * Math.PI * i) / 6;
-      pos[id] = { x: cx + rx * Math.cos(a), y: cy + ry * Math.sin(a) };
+    Object.keys(nodes).forEach(id => {
+      const c = NODE_COLUMN[id]; const r = NODE_ROW[id];
+      if (c === undefined || r === undefined) return;
+      pos[id] = { x: colX(c), y: rowY(r) };
     });
-    const linkData = Object.entries(links).map(([id, l]) => ({
-      id, ...l, s: pos[l.src_node || l.src] || { x: cx, y: cy },
-      t: pos[l.dst_node || l.dst] || { x: cx, y: cy }, util: l.utilization_pct || 0,
-    }));
-    const nodeData = Object.entries(nodes).map(([id, n]) => ({ id, ...n, ...(pos[id] || { x: cx, y: cy }) }));
-    const nodeR = Math.max(18, Math.min(30, Math.min(rx, ry) * 0.28));
-    const fs = Math.max(10, nodeR * 0.55);
-    svg.append("g").selectAll("line").data(linkData).enter().append("line")
-      .attr("x1", d => d.s.x).attr("y1", d => d.s.y).attr("x2", d => d.t.x).attr("y2", d => d.t.y)
-      .attr("stroke", "#000").attr("stroke-width", 10).attr("opacity", 0.4);
-    svg.append("g").selectAll("line").data(linkData).enter().append("line")
-      .attr("x1", d => d.s.x).attr("y1", d => d.s.y).attr("x2", d => d.t.x).attr("y2", d => d.t.y)
-      .attr("stroke", d => d.state === "down" ? "#333" : utilColor(d.util))
-      .attr("stroke-width", 4).attr("stroke-dasharray", d => d.state === "down" ? "8,6" : null)
-      .attr("opacity", d => d.state === "down" ? 0.3 : 1);
-    svg.append("g").selectAll("text").data(linkData).enter().append("text")
-      .attr("x", d => (d.s.x + d.t.x) / 2).attr("y", d => (d.s.y + d.t.y) / 2 - 7)
-      .attr("text-anchor", "middle").attr("fill", d => d.state === "down" ? C.red : utilColor(d.util))
-      .attr("font-size", "17px").attr("font-family", "monospace").attr("font-weight", "bold")
-      .text(d => d.state === "down" ? "DOWN" : `${d.util.toFixed(0)}%`);
-    svg.append("g").selectAll("circle").data(nodeData).enter().append("circle")
-      .attr("cx", d => d.x).attr("cy", d => d.y).attr("r", nodeR + 8).attr("fill", "none")
-      .attr("stroke", d => d.state === "down" ? C.red : C.accent).attr("stroke-width", 1.5).attr("opacity", 0.25);
-    svg.append("g").selectAll("circle").data(nodeData).enter().append("circle")
-      .attr("cx", d => d.x).attr("cy", d => d.y).attr("r", nodeR)
-      .attr("fill", d => d.state === "down" ? "#1a1a2e" : "#1f6feb")
-      .attr("stroke", d => d.state === "down" ? C.red : C.accent).attr("stroke-width", 2);
-    svg.append("g").selectAll("text").data(nodeData).enter().append("text")
-      .attr("x", d => d.x).attr("y", d => d.y).attr("text-anchor", "middle")
-      .attr("dominant-baseline", "middle").attr("fill", C.text)
-      .attr("font-size", fs + "px").attr("font-weight", "bold").attr("font-family", "Arial")
-      .text(d => d.id);
-  }, [linksKey, nodesKey]);
+
+    const nodeData = Object.entries(nodes)
+      .filter(([id]) => pos[id])
+      .map(([id, n]) => ({ id, ...n, ...pos[id] }));
+
+    const linkData = Object.entries(links).map(([id, l]) => {
+      const srcId = l.src_node || l.src;
+      const dstId = l.dst_node || l.dst;
+      return {
+        id, ...l,
+        s: pos[srcId], t: pos[dstId],
+        util: l.utilization_pct || 0,
+        is_stub: !!l.is_stub,
+      };
+    }).filter(d => d.s && d.t);
+
+    // 1. Stub + transport links — stubs dashed/thinner/grey, transport coloured by util
+    svg.append("g").selectAll("line.core-link").data(linkData.filter(d => !d.is_stub)).enter()
+      .append("line")
+        .attr("x1", d => d.s.x).attr("y1", d => d.s.y)
+        .attr("x2", d => d.t.x).attr("y2", d => d.t.y)
+        .attr("stroke", d => d.state === "down" ? "#555" : utilColor(d.util))
+        .attr("stroke-width", 4)
+        .attr("stroke-dasharray", d => d.state === "down" ? "8,6" : null)
+        .attr("opacity", d => d.state === "down" ? 0.45 : 0.95);
+
+    svg.append("g").selectAll("line.stub-link").data(linkData.filter(d => d.is_stub)).enter()
+      .append("line")
+        .attr("x1", d => d.s.x).attr("y1", d => d.s.y)
+        .attr("x2", d => d.t.x).attr("y2", d => d.t.y)
+        .attr("stroke", C.muted)
+        .attr("stroke-width", 2)
+        .attr("stroke-dasharray", "5,4")
+        .attr("opacity", 0.7);
+
+    // 2. Utilization labels on transport links only
+    svg.append("g").selectAll("text.util").data(linkData.filter(d => !d.is_stub)).enter()
+      .append("text")
+        .attr("x", d => (d.s.x + d.t.x) / 2)
+        .attr("y", d => (d.s.y + d.t.y) / 2 - 7)
+        .attr("text-anchor", "middle")
+        .attr("fill", d => d.state === "down" ? C.red : utilColor(d.util))
+        .attr("font-size", "17px").attr("font-family", "monospace").attr("font-weight", "bold")
+        .text(d => d.state === "down" ? "DOWN" : `${d.util.toFixed(0)}%`);
+
+    // 3. LSP overlay paths — one routed polyline per LSP (slice A + B)
+    const lspList = lsps ? Object.values(lsps) : [];
+    const lspHop = (lsp) => {
+      const hops = [];
+      const slice = Object.values(slices || {}).find(s => s.lsp === lsp.id);
+      if (slice) hops.push(slice.gnb);
+      hops.push(...(lsp.path || []));
+      if (slice) hops.push(slice.upf);
+      return hops;
+    };
+
+    svg.append("g").selectAll("path.lsp").data(lspList).enter()
+      .append("path")
+        .attr("fill", "none")
+        .attr("stroke", d => SLICE_COLOR[Object.values(slices || {}).find(s => s.lsp === d.id)?.id] || C.purple)
+        .attr("stroke-width", 3)
+        .attr("stroke-linecap", "round")
+        .attr("stroke-linejoin", "round")
+        .attr("opacity", 0.55)
+        .attr("d", d => {
+          const hops = lspHop(d);
+          const points = hops.map(h => pos[h]).filter(Boolean);
+          if (points.length < 2) return "";
+          return points.map((p, i) => `${i === 0 ? "M" : "L"}${p.x},${p.y}`).join(" ");
+        });
+
+    // LSP label near midpoint of its transport portion
+    svg.append("g").selectAll("text.lsp-lbl").data(lspList).enter()
+      .append("text")
+        .attr("x", d => {
+          const pts = (d.path || []).map(h => pos[h]).filter(Boolean);
+          if (!pts.length) return 0;
+          const mid = pts[Math.floor(pts.length / 2)];
+          return mid.x;
+        })
+        .attr("y", d => {
+          const pts = (d.path || []).map(h => pos[h]).filter(Boolean);
+          if (!pts.length) return 0;
+          const mid = pts[Math.floor(pts.length / 2)];
+          const row = NODE_ROW[d.path[Math.floor(d.path.length / 2)]];
+          return mid.y + (row === 0 ? -28 : 34);
+        })
+        .attr("text-anchor", "middle")
+        .attr("fill", d => SLICE_COLOR[Object.values(slices || {}).find(s => s.lsp === d.id)?.id] || C.purple)
+        .attr("font-size", "11px")
+        .attr("font-family", "monospace")
+        .attr("font-weight", "700")
+        .text(d => {
+          const slice = Object.values(slices || {}).find(s => s.lsp === d.id);
+          return slice ? `${d.id} · ${slice.id}` : d.id;
+        });
+
+    // 4. Nodes
+    const nodeGroups = svg.append("g").selectAll("g.node").data(nodeData).enter()
+      .append("g").attr("class", "node")
+      .attr("transform", d => `translate(${d.x},${d.y})`);
+
+    const NODE_R = 22;
+    const RECT_W = 64, RECT_H = 36;
+
+    nodeGroups.each(function (d) {
+      const style = ROLE_STYLE[d.role] || ROLE_STYLE.edge;
+      const g = d3.select(this);
+      if (style.shape === "rect") {
+        g.append("rect")
+          .attr("x", -RECT_W/2).attr("y", -RECT_H/2)
+          .attr("width", RECT_W).attr("height", RECT_H)
+          .attr("rx", 6).attr("ry", 6)
+          .attr("fill", d.state === "down" ? "#1a1a2e" : style.fill)
+          .attr("stroke", d.state === "down" ? C.red : style.stroke)
+          .attr("stroke-width", 2);
+      } else {
+        g.append("circle")
+          .attr("r", NODE_R)
+          .attr("fill", d.state === "down" ? "#1a1a2e" : style.fill)
+          .attr("stroke", d.state === "down" ? C.red : style.stroke)
+          .attr("stroke-width", 2);
+      }
+
+      // Antenna icon for RAN nodes — two arcs + vertical stroke, above/right of node
+      if (d.role === "ran") {
+        const ax = RECT_W/2 + 6, ay = -RECT_H/2 - 4;
+        g.append("line")
+          .attr("x1", ax).attr("y1", ay - 2).attr("x2", ax).attr("y2", ay + 10)
+          .attr("stroke", "#fbbf24").attr("stroke-width", 2);
+        g.append("path")
+          .attr("d", `M ${ax-5},${ay+2} Q ${ax},${ay-4} ${ax+5},${ay+2}`)
+          .attr("fill", "none").attr("stroke", "#fbbf24").attr("stroke-width", 1.6);
+        g.append("path")
+          .attr("d", `M ${ax-8},${ay+4} Q ${ax},${ay-8} ${ax+8},${ay+4}`)
+          .attr("fill", "none").attr("stroke", "#fbbf24").attr("stroke-width", 1.4).attr("opacity", 0.7);
+      }
+
+      // UPF gets 3 small horizontal bars (server stack)
+      if (d.role === "upf") {
+        for (let i = 0; i < 3; i++) {
+          g.append("rect")
+            .attr("x", -9).attr("y", -10 + i * 7)
+            .attr("width", 18).attr("height", 4)
+            .attr("rx", 1)
+            .attr("fill", "rgba(255,255,255,0.18)");
+        }
+      }
+
+      // Label
+      g.append("text")
+        .attr("text-anchor", "middle")
+        .attr("dominant-baseline", "middle")
+        .attr("fill", style.label)
+        .attr("font-size", d.role === "ran" || d.role === "upf" ? "10px" : "11px")
+        .attr("font-weight", "700")
+        .attr("font-family", "monospace")
+        .attr("y", d.role === "upf" ? 14 : (d.role === "ran" ? 0 : 0))
+        .text(d.id);
+    });
+
+    // 5. Legend (bottom-right, slice A + B)
+    const sliceRows = Object.values(slices || {});
+    if (sliceRows.length) {
+      const lgW = 280, lgH = 22 * sliceRows.length + 18;
+      const lgX = W - lgW - 14, lgY = H - lgH - 10;
+      const lg = svg.append("g");
+      lg.append("rect")
+        .attr("x", lgX).attr("y", lgY)
+        .attr("width", lgW).attr("height", lgH)
+        .attr("rx", 6)
+        .attr("fill", "rgba(17,24,39,0.92)")
+        .attr("stroke", C.border);
+      sliceRows.forEach((s, i) => {
+        const y = lgY + 18 + i * 22;
+        lg.append("circle").attr("cx", lgX + 14).attr("cy", y - 4).attr("r", 5)
+          .attr("fill", SLICE_COLOR[s.id] || C.muted);
+        lg.append("text").attr("x", lgX + 26).attr("y", y)
+          .attr("fill", C.text).attr("font-size", "11px").attr("font-family", "monospace")
+          .text(`${s.id.toUpperCase()} · ${s.gnb} → ${s.lsp} → ${s.upf}`);
+        lg.append("text").attr("x", lgX + lgW - 12).attr("y", y)
+          .attr("fill", C.muted).attr("font-size", "10px").attr("font-family", "monospace")
+          .attr("text-anchor", "end")
+          .text(`${s.subscribers.toLocaleString()} subs · SLA ${s.sla_latency_ms}ms`);
+      });
+    }
+  }, [stateKey]);
+
   useEffect(() => {
     draw();
     const ro = new ResizeObserver(draw);
@@ -860,7 +1043,7 @@ function OperationsTab({ state, events, agentRunning, wsStatus, onToggleAgent, o
         {/* TOP: Topology + Alarms sidebar */}
         <div style={{ height: "38%", display: "flex", gap: 12, flexShrink: 0 }}>
           <Panel title="Network Topology" style={{ flex: 1 }}>
-            <TopologyMap nodes={state.nodes || {}} links={state.links || {}} />
+            <TopologyMap nodes={state.nodes || {}} links={state.links || {}} lsps={state.lsps || {}} slices={state.slices || {}} />
           </Panel>
           <div style={{ width: 210, display: "flex", flexDirection: "column", gap: 8, flexShrink: 0 }}>
             <div style={{ background: C.panel, border: `1px solid ${C.border}`, borderRadius: 8, padding: "9px 12px", display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>

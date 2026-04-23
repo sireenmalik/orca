@@ -69,7 +69,13 @@ async def health(): return {"status": "ok", "service": "ORCA"}
 @app.get("/api/state")
 async def get_state():
     state = await adapter.get_full_state()
-    return {"nodes": state.nodes, "links": state.links, "lsps": state.lsps, "alarms": state.alarms}
+    return {
+        "nodes": state.nodes, "links": state.links,
+        "lsps": state.lsps, "alarms": state.alarms,
+        # v2 demo additions — RAN/UPF topology layer
+        "slices":   state.slices,
+        "sessions": state.sessions,
+    }
 
 # ── Agent ─────────────────────────────────────────────────────────────────────
 @app.post("/api/agent/start")
@@ -120,7 +126,8 @@ async def _broadcast_state():
     state = await adapter.get_full_state()
     await manager.broadcast({
         "type": "state_update", "timestamp": datetime.utcnow().isoformat(),
-        "data": {"nodes": state.nodes, "links": state.links, "lsps": state.lsps, "alarms": state.alarms}
+        "data": {"nodes": state.nodes, "links": state.links, "lsps": state.lsps,
+                 "alarms": state.alarms, "slices": state.slices, "sessions": state.sessions}
     })
 
 # ── Email queue ───────────────────────────────────────────────────────────────

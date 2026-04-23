@@ -54,6 +54,8 @@ class NetworkState:
     links: dict
     lsps: dict
     alarms: list
+    slices: dict = field(default_factory=dict)
+    sessions: dict = field(default_factory=dict)
 
 
 class NetworkAdapter(ABC):
@@ -79,38 +81,122 @@ class NetworkAdapter(ABC):
 
 class ContainerlabAdapter(NetworkAdapter):
     """
-    Simulated 6-node ring topology for demo.
+    Simulated end-to-end 5G topology for demo v2:
+      RAN (gNBs, left) → MPLS transport (PE/P mesh, middle) → 5G core (UPFs, right)
+
+    Node roles drive frontend styling:
+      ran   — gNodeB (radio accent + antenna icon)
+      upf   — User Plane Function (core accent, server icon)
+      edge  — MPLS edge router (PE-xx)
+      core  — MPLS P router (P-xx)
+
+    Link role = "stub" means "endpoint connects to an edge via a single
+    stub interface" — rendered thinner/dashed. Transport mesh links have
+    no role set (default).
+
     Swap NETWORK_ADAPTER env var to use production adapters.
     """
 
     TOPOLOGY = {
         "nodes": {
-            "PE-01": Node("PE-01", "10.0.0.1", "up", "core"),
-            "P-02": Node("P-02", "10.0.0.2", "up", "core"),
-            "PE-03": Node("PE-03", "10.0.0.3", "up", "core"),
-            "PE-04": Node("PE-04", "10.0.0.4", "up", "core"),
-            "P-01": Node("P-01", "10.0.0.5", "up", "core"),
-            "PE-02": Node("PE-02", "10.0.0.6", "up", "core"),
+            # ── RAN (stubs into PE-01 and PE-02) ──
+            "gNB-1":  Node("gNB-1",  "10.1.0.1", "up", "ran"),
+            "gNB-2":  Node("gNB-2",  "10.1.0.2", "up", "ran"),
+            # ── MPLS transport ──
+            "PE-01": Node("PE-01", "10.0.0.1", "up", "edge"),
+            "P-02":  Node("P-02",  "10.0.0.2", "up", "core"),
+            "PE-03": Node("PE-03", "10.0.0.3", "up", "edge"),
+            "PE-04": Node("PE-04", "10.0.0.4", "up", "edge"),
+            "P-01":  Node("P-01",  "10.0.0.5", "up", "core"),
+            "PE-02": Node("PE-02", "10.0.0.6", "up", "edge"),
+            # ── 5G core (stubs off PE-03 and PE-04) ──
+            "UPF-01": Node("UPF-01", "10.2.0.1", "up", "upf"),
+            "UPF-02": Node("UPF-02", "10.2.0.2", "up", "upf"),
         },
         "links": {
-            "PE-01-P-02": Link("PE-01-P-02", "PE-01", "P-02", "eth1", "eth1", 10.0),
-            "P-02-PE-03": Link("P-02-PE-03", "P-02", "PE-03", "eth2", "eth1", 10.0),
+            # Transport mesh (unchanged from Phase 1A rename)
+            "PE-01-P-02":  Link("PE-01-P-02",  "PE-01", "P-02",  "eth1", "eth1", 10.0),
+            "P-02-PE-03":  Link("P-02-PE-03",  "P-02",  "PE-03", "eth2", "eth1", 10.0),
             "PE-03-PE-04": Link("PE-03-PE-04", "PE-03", "PE-04", "eth2", "eth1", 10.0),
-            "PE-04-P-01": Link("PE-04-P-01", "PE-04", "P-01", "eth2", "eth1", 10.0),
-            "P-01-PE-02": Link("P-01-PE-02", "P-01", "PE-02", "eth2", "eth1", 10.0),
+            "PE-04-P-01":  Link("PE-04-P-01",  "PE-04", "P-01",  "eth2", "eth1", 10.0),
+            "P-01-PE-02":  Link("P-01-PE-02",  "P-01",  "PE-02", "eth2", "eth1", 10.0),
             "PE-02-PE-01": Link("PE-02-PE-01", "PE-02", "PE-01", "eth2", "eth2", 10.0),
             "PE-01-PE-04": Link("PE-01-PE-04", "PE-01", "PE-04", "eth3", "eth3", 10.0),
-            "P-02-P-01": Link("P-02-P-01", "P-02", "P-01", "eth3", "eth3", 10.0),
+            "P-02-P-01":   Link("P-02-P-01",   "P-02",  "P-01",  "eth3", "eth3", 10.0),
+            # Stub links — RAN to PE and UPF to PE (thinner/dashed in UI)
+            "gNB-1-PE-01":  Link("gNB-1-PE-01",  "gNB-1",  "PE-01", "n3",    "eth4", 10.0),
+            "gNB-2-PE-02":  Link("gNB-2-PE-02",  "gNB-2",  "PE-02", "n3",    "eth4", 10.0),
+            "UPF-01-PE-03": Link("UPF-01-PE-03", "UPF-01", "PE-03", "n3",    "eth4", 10.0),
+            "UPF-02-PE-04": Link("UPF-02-PE-04", "UPF-02", "PE-04", "n3",    "eth4", 10.0),
         }
     }
 
+    # Links whose endpoint is a stub (ran or upf). Rendered differently on
+    # the topology and excluded from CSPF / transport reroute logic.
+    STUB_LINKS = {"gNB-1-PE-01", "gNB-2-PE-02", "UPF-01-PE-03", "UPF-02-PE-04"}
+
     LSP_DEFAULTS = {
+        # v2 demo LSPs — anchor the slice narrative.
+        # LSP-1: gNB-1 → PE-01 → P-02 → PE-03 → UPF-01 (slice A, enterprise)
+        # LSP-2: gNB-2 → PE-02 → P-01 → PE-04 → UPF-02 (slice B, consumer)
+        "LSP-1": LSP("LSP-1", "slice-A enterprise path", "PE-01", "PE-03",
+                     ["PE-01", "P-02", "PE-03"], 2.0),
+        "LSP-2": LSP("LSP-2", "slice-B consumer path",  "PE-02", "PE-04",
+                     ["PE-02", "P-01", "PE-04"], 1.5),
+        # v1 LSPs — still referenced by v1 baseline tests; kept for backward-
+        # compat until the v2 E2E suite replaces test_e2e_baseline.py.
         "lsp-customer-a": LSP("lsp-customer-a", "Customer-A Primary", "PE-01", "PE-04",
                               ["PE-01","P-02","PE-03","PE-04"], 2.0),
         "lsp-customer-b": LSP("lsp-customer-b", "Customer-B Primary", "P-02", "PE-02",
                               ["P-02","PE-03","PE-04","P-01","PE-02"], 1.5),
         "lsp-mgmt":       LSP("lsp-mgmt", "Management", "PE-01", "PE-02",
                               ["PE-01","PE-02"], 0.5),
+    }
+
+    # ── 5G slice data model ───────────────────────────────────────────
+    # Drives churn cohorts, SLA evaluation, reasoning log vocabulary.
+    SLICES = {
+        "slice-A": {
+            "id": "slice-A",
+            "name": "Enterprise eMBB",
+            "cohort": "enterprise",
+            "subscribers": 842,
+            "gnb": "gNB-1",
+            "upf": "UPF-01",
+            "lsp": "LSP-1",
+            "sla_latency_ms": 15,        # SLA threshold on one-way N3 latency
+            "current_latency_ms": 11.0,  # green at baseline
+            "arpu_usd": 1200,            # annual revenue per subscriber
+        },
+        "slice-B": {
+            "id": "slice-B",
+            "name": "Consumer eMBB",
+            "cohort": "consumer",
+            "subscribers": 15000,
+            "gnb": "gNB-2",
+            "upf": "UPF-02",
+            "lsp": "LSP-2",
+            "sla_latency_ms": 50,
+            "current_latency_ms": 28.0,
+            "arpu_usd": 30,
+        },
+    }
+
+    # Baseline PDU session distribution per UPF. Aggregate counters —
+    # individual session objects are not modeled (demo performance).
+    SESSIONS_BASELINE = {
+        "UPF-01": {
+            "total": 612,
+            "by_slice": {"slice-A": 612, "slice-B": 0},
+            "by_gnb":   {"gNB-1": 612,   "gNB-2": 0},
+            "high_bw_sessions": 180,  # priority-class count, used by PFCP rebalance demo
+        },
+        "UPF-02": {
+            "total": 8243,
+            "by_slice": {"slice-A": 0, "slice-B": 8243},
+            "by_gnb":   {"gNB-1": 0,   "gNB-2": 8243},
+            "high_bw_sessions": 40,
+        },
     }
 
     # Approved baseline configs (what should be on each router)
@@ -150,15 +236,30 @@ class ContainerlabAdapter(NetworkAdapter):
         self._metrics = {lid: 10 for lid in self._links}
         self._start_time = time.time()
         self._base_util = {
+            # Transport mesh
             "PE-01-P-02": 35.0, "P-02-PE-03": 40.0, "PE-03-PE-04": 38.0,
             "PE-04-P-01": 28.0, "P-01-PE-02": 32.0, "PE-02-PE-01": 25.0,
-            "PE-01-PE-04": 22.0, "P-02-P-01": 24.0
+            "PE-01-PE-04": 22.0, "P-02-P-01": 24.0,
+            # Stubs — light load, cosmetic only
+            "gNB-1-PE-01":  18.0, "gNB-2-PE-02":  16.0,
+            "UPF-01-PE-03": 22.0, "UPF-02-PE-04": 20.0,
         }
         # Security: rogue config injection flag
         self._rogue_config: dict = {}  # node -> list of rogue changes
         # Churn: LSP utilization history (96 slots = 24h at 15min intervals)
         self._lsp_history: dict = {lsp_id: [] for lsp_id in self.LSP_DEFAULTS}
         self._history_tick = 0
+        # 5G slice + session state (mutable — reroute/rebalance updates these)
+        self._slices = {sid: dict(s) for sid, s in self.SLICES.items()}
+        self._sessions = {
+            upf: {
+                "total":              data["total"],
+                "by_slice":           dict(data["by_slice"]),
+                "by_gnb":             dict(data["by_gnb"]),
+                "high_bw_sessions":   data["high_bw_sessions"],
+            }
+            for upf, data in self.SESSIONS_BASELINE.items()
+        }
 
     def inject_rogue_config(self, node: str = "PE-01") -> dict:
         """Simulate an unauthorized config change pushed directly to a router."""
@@ -243,9 +344,19 @@ class ContainerlabAdapter(NetworkAdapter):
                       for k, v in self._nodes.items()},
             "links": {k: {"id": v.id, "src": v.src_node, "dst": v.dst_node,
                           "capacity_gbps": v.capacity_gbps, "state": v.state,
-                          "metric": self._metrics.get(k, 10)}
+                          "metric": self._metrics.get(k, 10),
+                          "is_stub": k in self.STUB_LINKS}
                       for k, v in self._links.items()}
         }
+
+    def get_slices(self) -> dict:
+        """Current 5G slice state — subscribers, cohort, SLA, current latency."""
+        return {sid: dict(s) for sid, s in self._slices.items()}
+
+    def get_sessions(self) -> dict:
+        """Aggregate PDU session counters per UPF (per-slice, per-gNB breakdown)."""
+        return {upf: {k: (dict(v) if isinstance(v, dict) else v) for k, v in data.items()}
+                for upf, data in self._sessions.items()}
 
     async def get_link_utilization(self, link_id: str = None) -> dict:
         if link_id:
@@ -345,7 +456,8 @@ class ContainerlabAdapter(NetworkAdapter):
             self.record_lsp_utilization(lsp_id, max_path_util)
         return NetworkState(
             nodes=topo["nodes"], links=topo["links"],
-            lsps={l["id"]: l for l in lsps}, alarms=alarms
+            lsps={l["id"]: l for l in lsps}, alarms=alarms,
+            slices=self.get_slices(), sessions=self.get_sessions(),
         )
 
     def _find_adjacent_links(self, link_id: str) -> list:
