@@ -1068,8 +1068,11 @@ status: "evidence_archived"
                         "branch": result["branch"]
                     })
             elif name == "propose_config_change":
-                # Store proposal for dashboard display
-                from datetime import datetime
+                # Suppress re-proposal if one was already approved for this fault cycle
+                if getattr(self, '_proposal_approved', False):
+                    result = {"success": False, "message": "Config proposal already approved for this fault — skipping duplicate"}
+                    await self._emit("tool_result", {"tool": name, "result": result})
+                    return json.dumps(result)
                 # Normalise validation results — agent may pass strings or booleans
                 raw_validation = inputs.get("validation_results", {})
                 def _vpass(v):
@@ -1159,6 +1162,7 @@ status: "evidence_archived"
 
         if not has_fault and not context:
             self._last_fault_signature = None  # reset — ready for next fault
+            self._proposal_approved = False  # allow new proposals for new faults
             await self._emit("agent_status", {"status": "monitoring", "message": "Network healthy — no action required."})
             return {"status": "healthy"}
 
@@ -1238,6 +1242,7 @@ status: "evidence_archived"
     def reset_fault_signature(self):
         """Clear cached fault signature so the next poll cycle re-evaluates."""
         self._last_fault_signature = None
+        self._proposal_approved = False
 
     async def stop(self):
         self.running = False
@@ -1266,6 +1271,7 @@ def update_proposal_status(proposal_id: str, status: str) -> dict:
 
 def clear_proposals():
     _config_proposals.clear()
+
 
 
 
