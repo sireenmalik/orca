@@ -271,16 +271,47 @@ function AgentLogModal({ events, onClose }) {
 }
 
 // ─── CONFIG PROPOSAL MODAL ────────────────────────────────────────────────────
-function ConfigModal({ proposal, onClose, onAction }) {
+function ConfigModal({ proposal, onClose, onAction, events }) {
   const [comment, setComment] = useState("");
   const [action, setAction] = useState(null);
   const [activeRouter, setActiveRouter] = useState(null);
+  const [streamLog, setStreamLog] = useState([]);
 
   const handleAction = async (act) => {
     setAction(act);
-    await onAction(proposal.id, act, comment, proposal.changes);
-    onClose();
+    if (act !== "approved") {
+      // Non-approval actions: call API and close immediately
+      await onAction(proposal.id, act, comment, proposal.changes);
+      onClose();
+      return;
+    }
+    // Approval: call API, stay open, show streaming progress, close on complete
+    try {
+      await onAction(proposal.id, act, comment, proposal.changes);
+    } catch (e) {
+      setStreamLog(prev => [...prev, `❌ Error: ${e.message}`]);
+    }
+    // Fallback: close after 45 seconds if complete event never arrives
+    setTimeout(onClose, 45000);
   };
+
+  // Watch events for stream progress while pushing
+  useEffect(() => {
+    if (action !== "approved") return;
+    const relevant = (events || []).filter(e =>
+      ["git_command", "agent_status", "tool_result", "pr_opened", "netconf_push"].includes(e.type)
+    ).slice(-20);
+    const msgs = relevant.map(e => {
+      const d = e.data || {};
+      return d.command || d.message || (d.result?.message) || (d.pr_url ? `PR #${d.pr_number} → ${d.pr_url}` : null);
+    }).filter(Boolean);
+    setStreamLog(msgs);
+    // Close when stream completes
+    const complete = (events || []).slice(-10).find(e =>
+      e.type === "agent_status" && e.data?.status === "complete"
+    );
+    if (complete) setTimeout(onClose, 1500);
+  }, [events, action]);
 
   // Parse changes — agent sends {device, current_config, new_config, diff_summary}
   // Group by device name
@@ -440,7 +471,7 @@ function ConfigModal({ proposal, onClose, onAction }) {
         </div>
       </div>
 
-      {/* ── BOTTOM: device tabs + comment + actions ── */}
+      {/* ── BOTTOM: device tabs + stream progress + comment + actions ── */}
       <div style={{ borderTop: `1px solid ${C.border}`, flexShrink: 0 }}>
         <div style={{ display: "flex", gap: 4, padding: "6px 14px 0", borderBottom: `1px solid ${C.border}`, background: "#0d1117", alignItems: "center" }}>
           <span style={{ fontSize: 9, color: C.muted, textTransform: "uppercase", letterSpacing: 1, marginRight: 6 }}>Devices</span>
@@ -453,15 +484,29 @@ function ConfigModal({ proposal, onClose, onAction }) {
             }}>📋 {r}</button>
           ))}
         </div>
+        {/* Stream progress panel — visible while pushing */}
+        {action === "approved" && (
+          <div style={{ padding: "8px 14px", background: "#0a0f1e", borderBottom: `1px solid ${C.border}`, maxHeight: 110, overflow: "auto" }}>
+            {streamLog.length === 0
+              ? <div style={{ fontSize: 11, color: C.muted, fontFamily: "monospace" }}>⏳ Starting deployment...</div>
+              : streamLog.map((msg, i) => (
+                <div key={i} style={{ fontSize: 11, fontFamily: "monospace", lineHeight: 1.7,
+                  color: i === streamLog.length - 1 ? C.green : C.muted }}>
+                  {msg.startsWith("git ") || msg.startsWith("cfg(") ? "$ " : "→ "}{msg}
+                </div>
+              ))
+            }
+          </div>
+        )}
         <div style={{ padding: "10px 14px", display: "flex", gap: 8, alignItems: "center" }}>
           <textarea value={comment} onChange={e => setComment(e.target.value)} rows={1}
-            placeholder="Add a comment (optional)..."
-            style={{ flex: 1, padding: "7px 10px", background: "rgba(255,255,255,0.04)", border: `1px solid ${C.border}`, borderRadius: 6, color: C.text, fontSize: 12, resize: "none", outline: "none", fontFamily: "inherit" }} />
-          <button onClick={() => handleAction("rejected")} disabled={!!action} style={{ padding: "8px 14px", borderRadius: 6, fontSize: 12, fontWeight: 700, cursor: "pointer", background: C.red + "18", border: `1px solid ${C.red}44`, color: C.red, flexShrink: 0 }}>✗ Reject</button>
-          <button onClick={() => handleAction("saved")} disabled={!!action} style={{ padding: "8px 14px", borderRadius: 6, fontSize: 12, fontWeight: 700, cursor: "pointer", background: "rgba(255,255,255,0.04)", border: `1px solid ${C.border}`, color: C.muted, flexShrink: 0 }}>💾 Save</button>
-          <button onClick={() => handleAction("committed")} disabled={!!action} style={{ padding: "8px 14px", borderRadius: 6, fontSize: 12, fontWeight: 700, cursor: "pointer", background: C.blue + "18", border: `1px solid ${C.blue}44`, color: C.blue, flexShrink: 0 }}>🔀 Save & Commit</button>
-          <button onClick={() => handleAction("approved")} disabled={!!action} style={{ padding: "8px 18px", borderRadius: 6, fontSize: 12, fontWeight: 700, cursor: "pointer", background: C.green + "18", border: `1px solid ${C.green}44`, color: C.green, flexShrink: 0 }}>
-            {action === "approved" ? "Pushing..." : "✅ Approve & Push"}
+            placeholder="Add a comment (optional)..." disabled={!!action}
+            style={{ flex: 1, padding: "7px 10px", background: "rgba(255,255,255,0.04)", border: `1px solid ${C.border}`, borderRadius: 6, color: C.text, fontSize: 12, resize: "none", outline: "none", fontFamily: "inherit", opacity: action ? 0.5 : 1 }} />
+          <button onClick={() => handleAction("rejected")} disabled={!!action} style={{ padding: "8px 14px", borderRadius: 6, fontSize: 12, fontWeight: 700, cursor: action ? "default" : "pointer", background: C.red + "18", border: `1px solid ${C.red}44`, color: C.red, flexShrink: 0, opacity: action ? 0.4 : 1 }}>✗ Reject</button>
+          <button onClick={() => handleAction("saved")} disabled={!!action} style={{ padding: "8px 14px", borderRadius: 6, fontSize: 12, fontWeight: 700, cursor: action ? "default" : "pointer", background: "rgba(255,255,255,0.04)", border: `1px solid ${C.border}`, color: C.muted, flexShrink: 0, opacity: action ? 0.4 : 1 }}>💾 Save</button>
+          <button onClick={() => handleAction("committed")} disabled={!!action} style={{ padding: "8px 14px", borderRadius: 6, fontSize: 12, fontWeight: 700, cursor: action ? "default" : "pointer", background: C.blue + "18", border: `1px solid ${C.blue}44`, color: C.blue, flexShrink: 0, opacity: action ? 0.4 : 1 }}>🔀 Save & Commit</button>
+          <button onClick={() => handleAction("approved")} disabled={!!action} style={{ padding: "8px 18px", borderRadius: 6, fontSize: 12, fontWeight: 700, cursor: action ? "default" : "pointer", background: C.green + "18", border: `1px solid ${C.green}44`, color: C.green, flexShrink: 0 }}>
+            {action === "approved" ? "⚙️ Pushing..." : "✅ Approve & Push"}
           </button>
         </div>
       </div>
@@ -820,7 +865,7 @@ function OperationsTab({ state, events, agentRunning, wsStatus, onToggleAgent, o
       {/* Modals */}
       {logModalOpen && <AgentLogModal events={events} onClose={() => setLogModalOpen(false)} />}
       {emailModal && <EmailModal email={emailModal} onClose={() => setEmailModal(null)} onSend={onEmailSend} />}
-      {configModal && <ConfigModal proposal={configModal} onClose={() => setConfigModal(null)} onAction={onConfigAction} />}
+      {configModal && <ConfigModal proposal={configModal} onClose={() => setConfigModal(null)} onAction={onConfigAction} events={events} />}
     </div>
   );
 }
