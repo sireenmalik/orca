@@ -270,70 +270,119 @@ function ConfigModal({ proposal, onClose, onAction }) {
   const [action, setAction] = useState(null);
   const [activeRouter, setActiveRouter] = useState(null);
 
-  const sc = s => s === "approved" ? C.green : s === "rejected" ? C.red : s === "committed" ? C.blue : C.yellow;
-
-  const routerDiffs = useMemo(() => {
-    const changes = proposal.changes || [];
-    const diff = proposal.diff || [];
-    if (changes.length > 0) {
-      const grouped = {};
-      changes.forEach(ch => {
-        const node = ch.node || ch.router || "Router";
-        if (!grouped[node]) grouped[node] = [];
-        grouped[node].push(
-          { type: "context", line: `interface ${ch.interface || ch.iface || "to-unknown"}` },
-          { type: "remove",  line: `  ${ch.parameter || "metric"} ${ch.old_value ?? ch.from ?? "old"}` },
-          { type: "add",     line: `  ${ch.parameter || "metric"} ${ch.new_value ?? ch.to ?? "new"}` },
-        );
-      });
-      return grouped;
-    }
-    return diff.length > 0 ? { "All Routers": diff } : { "Router": [] };
-  }, [proposal.changes, proposal.diff]);
-
-  const routers = Object.keys(routerDiffs);
-  const selected = activeRouter || routers[0] || "";
-  const selectedChanges = (proposal.changes || []).filter(ch => (ch.node || ch.router) === selected);
-
   const handleAction = async (act) => {
     setAction(act);
     await onAction(proposal.id, act, comment, proposal.changes);
     onClose();
   };
 
+  // Parse changes — agent sends {device, current_config, new_config, diff_summary}
+  // Group by device name
+  const routerData = useMemo(() => {
+    const changes = proposal.changes || [];
+    const grouped = {};
+    changes.forEach(ch => {
+      const router = ch.device || ch.node || ch.router || "Router";
+      if (!grouped[router]) grouped[router] = [];
+      grouped[router].push(ch);
+    });
+    // If no structured changes, fall back to raw diff
+    if (Object.keys(grouped).length === 0 && (proposal.diff || []).length > 0) {
+      grouped["Router"] = [];
+    }
+    return grouped;
+  }, [proposal.changes, proposal.diff]);
+
+  const routers = Object.keys(routerData);
+  const sel = activeRouter || routers[0] || "";
+  const selChanges = routerData[sel] || [];
+
+  // Build diff lines from current_config / new_config strings
+  const diffLines = useMemo(() => {
+    if (selChanges.length > 0) {
+      const lines = [];
+      selChanges.forEach(ch => {
+        // Parse current_config lines as removes, new_config as adds
+        const cur = (ch.current_config || "").split("\n").filter(l => l.trim());
+        const nxt = (ch.new_config || "").split("\n").filter(l => l.trim());
+        // Find shared context lines
+        const allLines = new Set([...cur, ...nxt]);
+        allLines.forEach(line => {
+          const inCur = cur.includes(line);
+          const inNxt = nxt.includes(line);
+          if (inCur && inNxt) lines.push({ type: "context", line });
+          else if (inCur)     lines.push({ type: "remove",  line });
+          else if (inNxt)     lines.push({ type: "add",     line });
+        });
+        // If no parsed lines, use diff_summary
+        if (lines.length === 0 && ch.diff_summary) {
+          ch.diff_summary.split("\n").forEach(l => {
+            if (l.startsWith("+"))      lines.push({ type: "add",     line: l.slice(1).trim() });
+            else if (l.startsWith("-")) lines.push({ type: "remove",  line: l.slice(1).trim() });
+            else if (l.trim())          lines.push({ type: "context", line: l.trim() });
+          });
+        }
+      });
+      return lines;
+    }
+    // Fall back to proposal.diff
+    return (proposal.diff || []).map(d => ({
+      type: d.type || "context",
+      line: d.line || d.content || ""
+    }));
+  }, [selChanges, proposal.diff]);
+
+  // Proposed config = new_config of selected changes
+  const proposedConfig = useMemo(() => {
+    if (selChanges.length > 0) {
+      return selChanges.map(ch => ch.new_config || "").join("\n");
+    }
+    return diffLines.filter(d => d.type !== "remove").map(d => d.line).join("\n");
+  }, [selChanges, diffLines]);
+
+  // Title for active tab
+  const tabTitle = useMemo(() => {
+    if (selChanges.length > 0 && selChanges[0].diff_summary) return selChanges[0].diff_summary.slice(0, 60);
+    if (selChanges.length > 0 && selChanges[0].type) return selChanges[0].type.replace(/_/g, " ");
+    return "metric_change";
+  }, [selChanges]);
+
+  // Validation
   const rawChecks = proposal.validation_checks || proposal.validation || {};
   const rawDetail = proposal.validation_detail || {};
   const norm = v => typeof v === "boolean" ? v : !String(v).trim().startsWith("❌");
   const checks = {
     syntax:       { pass: norm(rawChecks.syntax       ?? true), label: "Syntax",       detail: rawDetail.syntax       || "Valid Nokia SR-OS 22.x syntax" },
     semantic:     { pass: norm(rawChecks.semantic     ?? true), label: "Semantic",     detail: rawDetail.semantic     || "All hops reachable, BW available" },
-    mission_1:    { pass: norm(rawChecks.mission_1    ?? true), label: "Mission 1",    detail: rawDetail.mission_1    || "All links remain < 90% utilization" },
+    mission_1:    { pass: norm(rawChecks.mission_1    ?? true), label: "Mission 1",    detail: rawDetail.mission_1    || "All links remain < 90%" },
     mission_2:    { pass: norm(rawChecks.mission_2    ?? true), label: "Mission 2",    detail: rawDetail.mission_2    || "Overall max utilization improves" },
     digital_twin: { pass: norm(rawChecks.digital_twin ?? true), label: "Digital Twin", detail: rawDetail.digital_twin || "Simulated — stable under peak load" },
     policy:       { pass: norm(rawChecks.policy       ?? true), label: "Policy",       detail: rawDetail.policy       || "Metric change within allowed range" },
   };
 
-  const diffLines = routerDiffs[selected] || [];
-  const proposedLines = diffLines.filter(d => d.type !== "remove");
+  const sc = s => s === "approved" ? C.green : s === "rejected" ? C.red : s === "committed" ? C.blue : C.yellow;
 
   return (
     <Modal title={`Config Proposal — ${proposal.title}`} onClose={onClose} width="1040px">
       <div style={{ flex: 1, display: "flex", overflow: "hidden" }}>
 
-        {/* LEFT SIDEBAR — status, reason, 6 validation checks */}
+        {/* ── LEFT SIDEBAR ── */}
         <div style={{ width: 210, flexShrink: 0, borderRight: `1px solid ${C.border}`, display: "flex", flexDirection: "column", overflow: "auto", background: "#0d1117" }}>
-          <div style={{ padding: "12px 14px", borderBottom: `1px solid ${C.border}` }}>
-            <div style={{ fontSize: 9, color: C.muted, letterSpacing: 1, textTransform: "uppercase", marginBottom: 6 }}>Status</div>
+          {/* Status */}
+          <div style={{ padding: "10px 14px", borderBottom: `1px solid ${C.border}` }}>
+            <div style={{ fontSize: 9, color: C.muted, letterSpacing: 1, textTransform: "uppercase", marginBottom: 5 }}>Status</div>
             <span style={{ fontSize: 11, padding: "3px 10px", borderRadius: 4, background: sc(proposal.status) + "22", color: sc(proposal.status), fontFamily: "monospace", fontWeight: 700, textTransform: "uppercase" }}>{proposal.status}</span>
           </div>
-          <div style={{ padding: "12px 14px", borderBottom: `1px solid ${C.border}` }}>
-            <div style={{ fontSize: 9, color: C.muted, letterSpacing: 1, textTransform: "uppercase", marginBottom: 6 }}>Reason</div>
+          {/* Reason */}
+          <div style={{ padding: "10px 14px", borderBottom: `1px solid ${C.border}` }}>
+            <div style={{ fontSize: 9, color: C.muted, letterSpacing: 1, textTransform: "uppercase", marginBottom: 5 }}>Reason</div>
             <div style={{ fontSize: 11, color: C.text, lineHeight: 1.5 }}>{proposal.reason}</div>
             {proposal.projected_improvement && (
               <div style={{ marginTop: 8, fontSize: 10, color: C.green, fontFamily: "monospace", lineHeight: 1.5 }}>↑ {proposal.projected_improvement}</div>
             )}
           </div>
-          <div style={{ padding: "12px 14px", flex: 1 }}>
+          {/* All 6 validation checks */}
+          <div style={{ padding: "10px 14px", flex: 1, overflow: "auto" }}>
             <div style={{ fontSize: 9, color: C.muted, letterSpacing: 1, textTransform: "uppercase", marginBottom: 10 }}>Validation</div>
             {Object.entries(checks).map(([k, c]) => (
               <div key={k} style={{ marginBottom: 10 }}>
@@ -347,11 +396,19 @@ function ConfigModal({ proposal, onClose, onAction }) {
           </div>
         </div>
 
-        {/* CENTER — diff */}
+        {/* ── CENTER: DIFF ── */}
         <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", borderRight: `1px solid ${C.border}` }}>
-          <div style={{ padding: "7px 14px", borderBottom: `1px solid ${C.border}`, fontSize: 9, fontWeight: 700, color: C.muted, letterSpacing: 1, textTransform: "uppercase", flexShrink: 0 }}>Diff — Current vs Proposed</div>
+          {/* Tab title bar */}
+          {sel && tabTitle && (
+            <div style={{ padding: "6px 14px", borderBottom: `1px solid ${C.border}`, display: "flex", alignItems: "center", gap: 8, flexShrink: 0, background: "#111" }}>
+              <span style={{ fontSize: 10, color: C.blue, fontFamily: "monospace" }}>📋 {sel}</span>
+              <span style={{ fontSize: 10, color: C.muted }}>{tabTitle}</span>
+            </div>
+          )}
+          <div style={{ padding: "6px 14px 4px", borderBottom: `1px solid ${C.border}`, fontSize: 9, fontWeight: 700, color: C.muted, letterSpacing: 1, textTransform: "uppercase", flexShrink: 0 }}>Diff — Current vs Proposed</div>
           <div style={{ flex: 1, overflow: "auto", background: "#0d1117", padding: "10px 14px", fontFamily: "monospace", fontSize: 12, lineHeight: 1.9 }}>
-            {diffLines.length === 0 ? <div style={{ color: C.muted }}>No changes.</div>
+            {diffLines.length === 0
+              ? <div style={{ color: C.muted, fontSize: 11 }}>No diff available.</div>
               : diffLines.map((d, i) => (
               <div key={i} style={{
                 padding: "0 8px", borderRadius: 2,
@@ -360,32 +417,27 @@ function ConfigModal({ proposal, onClose, onAction }) {
                 borderLeft: d.type === "add" ? `3px solid ${C.green}` : d.type === "remove" ? `3px solid ${C.red}` : "3px solid transparent",
               }}>
                 <span style={{ userSelect: "none", marginRight: 10, opacity: 0.5 }}>{d.type === "add" ? "+" : d.type === "remove" ? "−" : " "}</span>
-                {d.line || d.content}
+                {d.line}
               </div>
             ))}
           </div>
         </div>
 
-        {/* RIGHT — proposed config */}
+        {/* ── RIGHT: PROPOSED CONFIG ── */}
         <div style={{ width: 220, flexShrink: 0, display: "flex", flexDirection: "column", overflow: "hidden" }}>
-          <div style={{ padding: "7px 14px", borderBottom: `1px solid ${C.border}`, fontSize: 9, fontWeight: 700, color: C.muted, letterSpacing: 1, textTransform: "uppercase", flexShrink: 0 }}>Proposed Config — Editable</div>
-          <div style={{ flex: 1, overflow: "auto", padding: "10px 14px", fontFamily: "monospace", fontSize: 12, lineHeight: 1.9 }}>
-            {proposedLines.length > 0 ? proposedLines.map((d, i) => (
-              <div key={i} style={{ color: d.type === "add" ? C.green : C.text }}>{d.line || d.content}</div>
-            )) : selectedChanges.map((ch, i) => (
-              <div key={i} style={{ marginBottom: 8 }}>
-                <div style={{ color: C.muted }}>interface {ch.interface || ch.iface || "unknown"}</div>
-                <div style={{ paddingLeft: 16, color: C.green }}>{ch.parameter || "metric"} {ch.new_value ?? ch.to ?? "?"}</div>
-              </div>
+          <div style={{ padding: "6px 14px", borderBottom: `1px solid ${C.border}`, fontSize: 9, fontWeight: 700, color: C.muted, letterSpacing: 1, textTransform: "uppercase", flexShrink: 0 }}>Proposed Config — Editable</div>
+          <div style={{ flex: 1, overflow: "auto", padding: "10px 14px", fontFamily: "monospace", fontSize: 12, lineHeight: 1.9, color: C.text }}>
+            {proposedConfig.split("\n").filter(l => l.trim()).map((line, i) => (
+              <div key={i} style={{ color: line.trim().match(/^\d+$|^isis|^metric|^ospf/) ? C.green : C.text }}>{line}</div>
             ))}
           </div>
         </div>
       </div>
 
-      {/* BOTTOM — device tabs + comment + 4 action buttons */}
+      {/* ── BOTTOM: device tabs + comment + actions ── */}
       <div style={{ borderTop: `1px solid ${C.border}`, flexShrink: 0 }}>
-        <div style={{ display: "flex", gap: 4, padding: "6px 14px 0", borderBottom: `1px solid ${C.border}`, background: "#0d1117" }}>
-          <span style={{ fontSize: 9, color: C.muted, textTransform: "uppercase", letterSpacing: 1, alignSelf: "center", marginRight: 6 }}>Devices</span>
+        <div style={{ display: "flex", gap: 4, padding: "6px 14px 0", borderBottom: `1px solid ${C.border}`, background: "#0d1117", alignItems: "center" }}>
+          <span style={{ fontSize: 9, color: C.muted, textTransform: "uppercase", letterSpacing: 1, marginRight: 6 }}>Devices</span>
           {routers.map(r => (
             <button key={r} onClick={() => setActiveRouter(r)} style={{
               padding: "5px 14px", borderRadius: "4px 4px 0 0", fontSize: 11, fontWeight: 600,
@@ -395,8 +447,10 @@ function ConfigModal({ proposal, onClose, onAction }) {
             }}>📋 {r}</button>
           ))}
         </div>
-        <div style={{ padding: "10px 14px", display: "flex", gap: 10, alignItems: "center" }}>
-          <textarea value={comment} onChange={e => setComment(e.target.value)} rows={1} placeholder="Add a comment (optional)..." style={{ flex: 1, padding: "7px 10px", background: "rgba(255,255,255,0.04)", border: `1px solid ${C.border}`, borderRadius: 6, color: C.text, fontSize: 12, resize: "none", outline: "none", fontFamily: "inherit" }} />
+        <div style={{ padding: "10px 14px", display: "flex", gap: 8, alignItems: "center" }}>
+          <textarea value={comment} onChange={e => setComment(e.target.value)} rows={1}
+            placeholder="Add a comment (optional)..."
+            style={{ flex: 1, padding: "7px 10px", background: "rgba(255,255,255,0.04)", border: `1px solid ${C.border}`, borderRadius: 6, color: C.text, fontSize: 12, resize: "none", outline: "none", fontFamily: "inherit" }} />
           <button onClick={() => handleAction("rejected")} disabled={!!action} style={{ padding: "8px 14px", borderRadius: 6, fontSize: 12, fontWeight: 700, cursor: "pointer", background: C.red + "18", border: `1px solid ${C.red}44`, color: C.red, flexShrink: 0 }}>✗ Reject</button>
           <button onClick={() => handleAction("saved")} disabled={!!action} style={{ padding: "8px 14px", borderRadius: 6, fontSize: 12, fontWeight: 700, cursor: "pointer", background: "rgba(255,255,255,0.04)", border: `1px solid ${C.border}`, color: C.muted, flexShrink: 0 }}>💾 Save</button>
           <button onClick={() => handleAction("committed")} disabled={!!action} style={{ padding: "8px 14px", borderRadius: 6, fontSize: 12, fontWeight: 700, cursor: "pointer", background: C.blue + "18", border: `1px solid ${C.blue}44`, color: C.blue, flexShrink: 0 }}>🔀 Save & Commit</button>
