@@ -169,8 +169,8 @@ async def _write_episode(inputs: dict) -> dict:
     # Network state
     util_before = inputs.get("utilization_before", {})
     util_after = inputs.get("utilization_after", {})
-    util_before_yaml = "\n".join(f"    {k}: {v}%" for k, v in util_before.items()) if util_before else "    # not captured"
-    util_after_yaml = "\n".join(f"    {k}: {v}%" for k, v in util_after.items()) if util_after else "    # not captured"
+    util_before_yaml = "\n".join(f"      {k}: {v}%" for k, v in util_before.items()) if util_before else "      # not captured"
+    util_after_yaml = "\n".join(f"      {k}: {v}%" for k, v in util_after.items()) if util_after else "      # not captured"
 
     lsps = inputs.get("lsps_affected", [])
     lsps_yaml = "\n".join(f'  - "{l}"' for l in lsps) if lsps else '  - "not recorded"'
