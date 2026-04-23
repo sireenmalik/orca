@@ -1,0 +1,19 @@
+# ORCA Config Proposal — R1
+# Generated: 2026-04-23T09:06:32.712953Z
+# Incident: R1-R4 link failure requires permanent IGP metric optimization to prevent future congestion and optimize traffic distribution in the reduced topology. Current metrics assume full mesh connectivity.
+# Branch: cfg/R1-20260423-090631
+
+configure router isis 0
+    interface "unknown"
+-       metric ?
++       metric ?
+    exit
+    interface "unknown"
+-       metric ?
++       metric ?
+    exit
+    interface "unknown"
+-       metric ?
++       metric ?
+    exit
+exit
