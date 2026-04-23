@@ -13,6 +13,24 @@ const C = {
 const utilColor = u => u >= 90 ? C.red : u >= 80 ? C.orange : u >= 60 ? C.yellow : C.green;
 const sevColor = { critical: "#ef4444", high: "#f97316", medium: "#eab308", warning: "#eab308", low: "#06b6d4", info: "#8b5cf6" };
 
+// ─── CHURN CHART DATA (static — drives the forecast sparkline in ChurnTab) ───
+const churnHistory = [
+  { m: "Nov", v: 3.1 },
+  { m: "Dec", v: 3.3 },
+  { m: "Jan", v: 3.6 },
+  { m: "Feb", v: 3.8 },
+  { m: "Mar", v: 3.5 },
+  { m: "Apr", v: 3.4 },
+];
+const churnForecast = [
+  { m: "May", v: 3.2, lo: 2.8, hi: 3.6 },
+  { m: "Jun", v: 3.0, lo: 2.5, hi: 3.5 },
+  { m: "Jul", v: 2.8, lo: 2.2, hi: 3.4 },
+  { m: "Aug", v: 2.7, lo: 2.0, hi: 3.4 },
+  { m: "Sep", v: 2.6, lo: 1.8, hi: 3.4 },
+  { m: "Oct", v: 2.5, lo: 1.6, hi: 3.4 },
+];
+
 // ─── SHARED PANEL ─────────────────────────────────────────────────────────────
 function Panel({ title, badge, children, style }) {
   return (
