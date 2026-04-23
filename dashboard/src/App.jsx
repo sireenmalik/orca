@@ -269,32 +269,31 @@ function ConfigModal({ proposal, onClose, onAction }) {
   const [comment, setComment] = useState("");
   const [action, setAction] = useState(null);
   const [activeRouter, setActiveRouter] = useState(null);
+
   const sc = s => s === "approved" ? C.green : s === "rejected" ? C.red : s === "committed" ? C.blue : C.yellow;
 
-  // Group diff lines by router/node
   const routerDiffs = useMemo(() => {
     const changes = proposal.changes || [];
     const diff = proposal.diff || [];
-    // Try to group by node from changes array first
     if (changes.length > 0) {
       const grouped = {};
       changes.forEach(ch => {
         const node = ch.node || ch.router || "Router";
         if (!grouped[node]) grouped[node] = [];
         grouped[node].push(
-          { type: "context", line: `interface ${ch.interface || ch.iface || "unknown"}` },
-          { type: "remove", line: `  ${ch.parameter || "metric"} ${ch.old_value ?? ch.from ?? "old"}` },
-          { type: "add",    line: `  ${ch.parameter || "metric"} ${ch.new_value ?? ch.to ?? "new"}` },
+          { type: "context", line: `interface ${ch.interface || ch.iface || "to-unknown"}` },
+          { type: "remove",  line: `  ${ch.parameter || "metric"} ${ch.old_value ?? ch.from ?? "old"}` },
+          { type: "add",     line: `  ${ch.parameter || "metric"} ${ch.new_value ?? ch.to ?? "new"}` },
         );
       });
       return grouped;
     }
-    // Fallback: put all diff under a single "All Routers" key
-    return diff.length > 0 ? { "All Routers": diff } : { "No Changes": [] };
+    return diff.length > 0 ? { "All Routers": diff } : { "Router": [] };
   }, [proposal.changes, proposal.diff]);
 
   const routers = Object.keys(routerDiffs);
   const selected = activeRouter || routers[0] || "";
+  const selectedChanges = (proposal.changes || []).filter(ch => (ch.node || ch.router) === selected);
 
   const handleAction = async (act) => {
     setAction(act);
@@ -303,134 +302,113 @@ function ConfigModal({ proposal, onClose, onAction }) {
   };
 
   const rawChecks = proposal.validation_checks || proposal.validation || {};
-  // Normalize — agent may send string values like "✅ Valid" or booleans
-  const normalize = v => {
-    if (typeof v === "boolean") return v;
-    if (typeof v === "string") return !v.startsWith("❌") && v !== "false";
-    return true;
+  const rawDetail = proposal.validation_detail || {};
+  const norm = v => typeof v === "boolean" ? v : !String(v).trim().startsWith("❌");
+  const checks = {
+    syntax:       { pass: norm(rawChecks.syntax       ?? true), label: "Syntax",       detail: rawDetail.syntax       || "Valid Nokia SR-OS 22.x syntax" },
+    semantic:     { pass: norm(rawChecks.semantic     ?? true), label: "Semantic",     detail: rawDetail.semantic     || "All hops reachable, BW available" },
+    mission_1:    { pass: norm(rawChecks.mission_1    ?? true), label: "Mission 1",    detail: rawDetail.mission_1    || "All links remain < 90% utilization" },
+    mission_2:    { pass: norm(rawChecks.mission_2    ?? true), label: "Mission 2",    detail: rawDetail.mission_2    || "Overall max utilization improves" },
+    digital_twin: { pass: norm(rawChecks.digital_twin ?? true), label: "Digital Twin", detail: rawDetail.digital_twin || "Simulated — stable under peak load" },
+    policy:       { pass: norm(rawChecks.policy       ?? true), label: "Policy",       detail: rawDetail.policy       || "Metric change within allowed range" },
   };
-  // Always show all 6 checks, falling back to true if not present
-  const checkKeys = ["syntax", "semantic", "mission_1", "mission_2", "digital_twin", "policy"];
-  const checkLabels = { syntax: "Syntax", semantic: "Semantic", mission_1: "Mission 1", mission_2: "Mission 2", digital_twin: "Digital Twin", policy: "Policy" };
-  const checkDetail = {
-    syntax: "Valid Nokia SR-OS 22.x syntax",
-    semantic: "All hops reachable, BW available",
-    mission_1: "All links remain below 90%",
-    mission_2: "Max utilization improves",
-    digital_twin: "Simulated stable under peak load",
-    policy: "Within policy, no excluded links",
-  };
-  const checks = Object.fromEntries(checkKeys.map(k => [k, normalize(rawChecks[k] ?? true)]));
-  const missions = {
-    "Mission 1 — Max util < 90%": checks.mission_1,
-    "Mission 2 — Minimize max util": checks.mission_2,
-  };
-  const otherChecks = checkKeys.filter(k => !["mission_1","mission_2"].includes(k));
+
+  const diffLines = routerDiffs[selected] || [];
+  const proposedLines = diffLines.filter(d => d.type !== "remove");
 
   return (
-    <Modal title={`Config Proposal — ${proposal.title}`} onClose={onClose} width="1020px">
-      <div style={{ flex: 1, overflow: "hidden", display: "flex", flexDirection: "column" }}>
+    <Modal title={`Config Proposal — ${proposal.title}`} onClose={onClose} width="1040px">
+      <div style={{ flex: 1, display: "flex", overflow: "hidden" }}>
 
-        {/* ── TOP BAND: summary + missions + validations ── */}
-        <div style={{ padding: "14px 20px", borderBottom: `1px solid ${C.border}`, display: "flex", gap: 20, flexShrink: 0 }}>
-          {/* Reason + improvement */}
-          <div style={{ flex: 1 }}>
-            <div style={{ fontSize: 10, color: C.muted, letterSpacing: 0.5, textTransform: "uppercase", marginBottom: 4 }}>Reason</div>
-            <div style={{ fontSize: 12, color: C.text, lineHeight: 1.5, marginBottom: 6 }}>{proposal.reason}</div>
+        {/* LEFT SIDEBAR — status, reason, 6 validation checks */}
+        <div style={{ width: 210, flexShrink: 0, borderRight: `1px solid ${C.border}`, display: "flex", flexDirection: "column", overflow: "auto", background: "#0d1117" }}>
+          <div style={{ padding: "12px 14px", borderBottom: `1px solid ${C.border}` }}>
+            <div style={{ fontSize: 9, color: C.muted, letterSpacing: 1, textTransform: "uppercase", marginBottom: 6 }}>Status</div>
+            <span style={{ fontSize: 11, padding: "3px 10px", borderRadius: 4, background: sc(proposal.status) + "22", color: sc(proposal.status), fontFamily: "monospace", fontWeight: 700, textTransform: "uppercase" }}>{proposal.status}</span>
+          </div>
+          <div style={{ padding: "12px 14px", borderBottom: `1px solid ${C.border}` }}>
+            <div style={{ fontSize: 9, color: C.muted, letterSpacing: 1, textTransform: "uppercase", marginBottom: 6 }}>Reason</div>
+            <div style={{ fontSize: 11, color: C.text, lineHeight: 1.5 }}>{proposal.reason}</div>
             {proposal.projected_improvement && (
-              <div style={{ fontSize: 11, fontFamily: "monospace", color: C.green }}>
-                ↑ Projected improvement: {proposal.projected_improvement}
-              </div>
+              <div style={{ marginTop: 8, fontSize: 10, color: C.green, fontFamily: "monospace", lineHeight: 1.5 }}>↑ {proposal.projected_improvement}</div>
             )}
           </div>
-
-          {/* Mission impact */}
-          <div style={{ flexShrink: 0 }}>
-            <div style={{ fontSize: 10, color: C.muted, letterSpacing: 0.5, textTransform: "uppercase", marginBottom: 6 }}>Mission Impact</div>
-            {Object.entries(missions).map(([label, pass]) => (
-              <div key={label} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6, padding: "6px 10px", borderRadius: 6, background: pass ? "rgba(16,185,129,0.06)" : "rgba(239,68,68,0.06)", border: `1px solid ${pass ? C.green + "33" : C.red + "33"}` }}>
-                <span style={{ fontSize: 14, lineHeight: 1 }}>{pass ? "✅" : "❌"}</span>
-                <span style={{ fontSize: 11, color: pass ? C.green : C.red, fontWeight: 600 }}>{label}</span>
+          <div style={{ padding: "12px 14px", flex: 1 }}>
+            <div style={{ fontSize: 9, color: C.muted, letterSpacing: 1, textTransform: "uppercase", marginBottom: 10 }}>Validation</div>
+            {Object.entries(checks).map(([k, c]) => (
+              <div key={k} style={{ marginBottom: 10 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 2 }}>
+                  <span style={{ fontSize: 12 }}>{c.pass ? "✅" : "❌"}</span>
+                  <span style={{ fontSize: 11, fontWeight: 700, color: c.pass ? C.green : C.red }}>{c.label}</span>
+                </div>
+                <div style={{ fontSize: 10, color: C.muted, lineHeight: 1.4, paddingLeft: 20 }}>{c.detail}</div>
               </div>
             ))}
-          </div>
-
-          {/* Validation checks */}
-          <div style={{ flexShrink: 0 }}>
-            <div style={{ fontSize: 10, color: C.muted, letterSpacing: 0.5, textTransform: "uppercase", marginBottom: 6 }}>Validation</div>
-            <div style={{ display: "flex", gap: 4, flexWrap: "wrap", maxWidth: 220 }}>
-              {otherChecks.map(k => (
-                <span key={k} style={{ fontSize: 10, padding: "4px 8px", borderRadius: 4, background: checks[k] ? C.green + "12" : C.red + "12", color: checks[k] ? C.green : C.red, fontFamily: "monospace", fontWeight: 700, display: "flex", flexDirection: "column", gap: 1 }}>
-                  <span>{checks[k] ? "✓" : "✗"} {checkLabels[k]}</span>
-                  <span style={{ fontSize: 8, fontWeight: 400, opacity: 0.7 }}>{checkDetail[k]}</span>
-                </span>
-              ))}
-              {otherChecks.length === 0 && (
-                <span style={{ fontSize: 10, color: C.muted }}>All checks passed</span>
-              )}
-            </div>
           </div>
         </div>
 
-        {/* ── MAIN: router tabs + diff ── */}
-        <div style={{ flex: 1, overflow: "hidden", display: "flex", flexDirection: "column" }}>
-          {/* Router tab bar */}
-          <div style={{ display: "flex", gap: 2, padding: "8px 20px 0", borderBottom: `1px solid ${C.border}`, flexShrink: 0, background: "#0d1117" }}>
-            {routers.map(r => (
-              <button key={r} onClick={() => setActiveRouter(r)} style={{
-                padding: "6px 14px", borderRadius: "5px 5px 0 0", fontSize: 11, fontWeight: 600,
-                cursor: "pointer", border: `1px solid ${C.border}`, borderBottom: "none",
-                background: (activeRouter || routers[0]) === r ? C.panel : "#0d1117",
-                color: (activeRouter || routers[0]) === r ? C.text : C.muted,
-                marginBottom: -1,
-              }}>{r}</button>
-            ))}
-            <div style={{ flex: 1, borderBottom: `1px solid ${C.border}` }} />
-          </div>
-
-          {/* Diff viewer */}
-          <div style={{ flex: 1, overflow: "auto", background: "#0d1117", padding: "12px 20px", fontFamily: "monospace", fontSize: 12, lineHeight: 1.8 }}>
-            {(routerDiffs[selected] || []).length === 0 ? (
-              <div style={{ color: C.muted, fontSize: 11 }}>No changes for this router.</div>
-            ) : (routerDiffs[selected] || []).map((d, i) => (
+        {/* CENTER — diff */}
+        <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", borderRight: `1px solid ${C.border}` }}>
+          <div style={{ padding: "7px 14px", borderBottom: `1px solid ${C.border}`, fontSize: 9, fontWeight: 700, color: C.muted, letterSpacing: 1, textTransform: "uppercase", flexShrink: 0 }}>Diff — Current vs Proposed</div>
+          <div style={{ flex: 1, overflow: "auto", background: "#0d1117", padding: "10px 14px", fontFamily: "monospace", fontSize: 12, lineHeight: 1.9 }}>
+            {diffLines.length === 0 ? <div style={{ color: C.muted }}>No changes.</div>
+              : diffLines.map((d, i) => (
               <div key={i} style={{
-                padding: "1px 8px", borderRadius: 2, marginBottom: 1,
+                padding: "0 8px", borderRadius: 2,
                 background: d.type === "add" ? "rgba(16,185,129,0.10)" : d.type === "remove" ? "rgba(239,68,68,0.10)" : "transparent",
                 color: d.type === "add" ? "#4ade80" : d.type === "remove" ? "#f87171" : "#6b7280",
                 borderLeft: d.type === "add" ? `3px solid ${C.green}` : d.type === "remove" ? `3px solid ${C.red}` : "3px solid transparent",
               }}>
-                <span style={{ userSelect: "none", marginRight: 8, opacity: 0.5 }}>
-                  {d.type === "add" ? "+" : d.type === "remove" ? "−" : " "}
-                </span>
+                <span style={{ userSelect: "none", marginRight: 10, opacity: 0.5 }}>{d.type === "add" ? "+" : d.type === "remove" ? "−" : " "}</span>
                 {d.line || d.content}
               </div>
             ))}
           </div>
         </div>
 
-        {/* ── FOOTER: comment + actions ── */}
-        <div style={{ padding: "12px 20px", borderTop: `1px solid ${C.border}`, display: "flex", gap: 12, alignItems: "flex-end", flexShrink: 0 }}>
-          <div style={{ flex: 1 }}>
-            <div style={{ fontSize: 10, color: C.muted, marginBottom: 4 }}>Comment (optional)</div>
-            <textarea value={comment} onChange={e => setComment(e.target.value)} rows={2} placeholder="Add a note before approving or rejecting..." style={{ width: "100%", padding: "7px 10px", background: "rgba(255,255,255,0.04)", border: `1px solid ${C.border}`, borderRadius: 6, color: C.text, fontSize: 12, resize: "none", outline: "none", fontFamily: "inherit" }} />
-          </div>
-          <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
-            <span style={{ fontSize: 11, padding: "3px 10px", borderRadius: 4, background: sc(proposal.status) + "18", color: sc(proposal.status), fontFamily: "monospace", fontWeight: 700, alignSelf: "center" }}>{proposal.status}</span>
-            {proposal.status === "pending" && <>
-              <button onClick={() => handleAction("rejected")} disabled={!!action} style={{ padding: "9px 18px", borderRadius: 6, fontSize: 12, fontWeight: 700, cursor: "pointer", background: C.red + "18", border: `1px solid ${C.red}44`, color: C.red }}>✗ Reject</button>
-              <button onClick={() => handleAction("approved")} disabled={!!action} style={{ padding: "9px 22px", borderRadius: 6, fontSize: 12, fontWeight: 700, cursor: "pointer", background: C.green + "18", border: `1px solid ${C.green}44`, color: C.green }}>
-                {action === "approved" ? "Pushing..." : "✓ Approve & Push All"}
-              </button>
-            </>}
+        {/* RIGHT — proposed config */}
+        <div style={{ width: 220, flexShrink: 0, display: "flex", flexDirection: "column", overflow: "hidden" }}>
+          <div style={{ padding: "7px 14px", borderBottom: `1px solid ${C.border}`, fontSize: 9, fontWeight: 700, color: C.muted, letterSpacing: 1, textTransform: "uppercase", flexShrink: 0 }}>Proposed Config — Editable</div>
+          <div style={{ flex: 1, overflow: "auto", padding: "10px 14px", fontFamily: "monospace", fontSize: 12, lineHeight: 1.9 }}>
+            {proposedLines.length > 0 ? proposedLines.map((d, i) => (
+              <div key={i} style={{ color: d.type === "add" ? C.green : C.text }}>{d.line || d.content}</div>
+            )) : selectedChanges.map((ch, i) => (
+              <div key={i} style={{ marginBottom: 8 }}>
+                <div style={{ color: C.muted }}>interface {ch.interface || ch.iface || "unknown"}</div>
+                <div style={{ paddingLeft: 16, color: C.green }}>{ch.parameter || "metric"} {ch.new_value ?? ch.to ?? "?"}</div>
+              </div>
+            ))}
           </div>
         </div>
+      </div>
 
+      {/* BOTTOM — device tabs + comment + 4 action buttons */}
+      <div style={{ borderTop: `1px solid ${C.border}`, flexShrink: 0 }}>
+        <div style={{ display: "flex", gap: 4, padding: "6px 14px 0", borderBottom: `1px solid ${C.border}`, background: "#0d1117" }}>
+          <span style={{ fontSize: 9, color: C.muted, textTransform: "uppercase", letterSpacing: 1, alignSelf: "center", marginRight: 6 }}>Devices</span>
+          {routers.map(r => (
+            <button key={r} onClick={() => setActiveRouter(r)} style={{
+              padding: "5px 14px", borderRadius: "4px 4px 0 0", fontSize: 11, fontWeight: 600,
+              cursor: "pointer", border: `1px solid ${C.border}`, borderBottom: "none",
+              background: (activeRouter || routers[0]) === r ? C.panel : "transparent",
+              color: (activeRouter || routers[0]) === r ? C.blue : C.muted, marginBottom: -1,
+            }}>📋 {r}</button>
+          ))}
+        </div>
+        <div style={{ padding: "10px 14px", display: "flex", gap: 10, alignItems: "center" }}>
+          <textarea value={comment} onChange={e => setComment(e.target.value)} rows={1} placeholder="Add a comment (optional)..." style={{ flex: 1, padding: "7px 10px", background: "rgba(255,255,255,0.04)", border: `1px solid ${C.border}`, borderRadius: 6, color: C.text, fontSize: 12, resize: "none", outline: "none", fontFamily: "inherit" }} />
+          <button onClick={() => handleAction("rejected")} disabled={!!action} style={{ padding: "8px 14px", borderRadius: 6, fontSize: 12, fontWeight: 700, cursor: "pointer", background: C.red + "18", border: `1px solid ${C.red}44`, color: C.red, flexShrink: 0 }}>✗ Reject</button>
+          <button onClick={() => handleAction("saved")} disabled={!!action} style={{ padding: "8px 14px", borderRadius: 6, fontSize: 12, fontWeight: 700, cursor: "pointer", background: "rgba(255,255,255,0.04)", border: `1px solid ${C.border}`, color: C.muted, flexShrink: 0 }}>💾 Save</button>
+          <button onClick={() => handleAction("committed")} disabled={!!action} style={{ padding: "8px 14px", borderRadius: 6, fontSize: 12, fontWeight: 700, cursor: "pointer", background: C.blue + "18", border: `1px solid ${C.blue}44`, color: C.blue, flexShrink: 0 }}>🔀 Save & Commit</button>
+          <button onClick={() => handleAction("approved")} disabled={!!action} style={{ padding: "8px 18px", borderRadius: 6, fontSize: 12, fontWeight: 700, cursor: "pointer", background: C.green + "18", border: `1px solid ${C.green}44`, color: C.green, flexShrink: 0 }}>
+            {action === "approved" ? "Pushing..." : "✅ Approve & Push"}
+          </button>
+        </div>
       </div>
     </Modal>
   );
 }
 
-// ─── EMAIL MODAL ──────────────────────────────────────────────────────────────
 function EmailModal({ email, onClose, onSend }) {
   const [subject, setSubject] = useState(email.subject);
   const [body, setBody] = useState(email.body);
