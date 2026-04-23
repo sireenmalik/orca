@@ -1134,6 +1134,8 @@ function SecurityTab({ events }) {
     status: a.status || "active",
     threat_intel: a.threat_intel,
     evidence_url: a.evidence_url,
+    remediation_pr_url: a.remediation_pr_url,
+    remediation_pr_number: a.remediation_pr_number,
     live: true,
   }));
 
@@ -1177,15 +1179,28 @@ function SecurityTab({ events }) {
                   </div>
                 )}
                 {ev.evidence_url && (
-                  <a href={ev.evidence_url} target="_blank" rel="noreferrer" style={{ display: "inline-block", marginTop: 5, fontSize: 10, color: C.blue, textDecoration: "none" }}>
+                  <a href={ev.evidence_url} target="_blank" rel="noreferrer" style={{ display: "inline-block", marginTop: 5, marginRight: 12, fontSize: 10, color: C.blue, textDecoration: "none" }}>
                     📁 Evidence PR → view on GitHub
+                  </a>
+                )}
+                {ev.remediation_pr_url && (
+                  <a href={ev.remediation_pr_url} target="_blank" rel="noreferrer" style={{ display: "inline-block", marginTop: 5, fontSize: 10, color: C.green, textDecoration: "none" }}>
+                    🔀 Remediation PR #{ev.remediation_pr_number} → view on GitHub
                   </a>
                 )}
               </div>
               <span style={{ fontSize: 9, padding: "2px 6px", borderRadius: 3, textAlign: "center", fontFamily: "monospace",
-                background: ev.status === "active" ? C.red + "12" : ev.status?.includes("revert") ? C.yellow + "12" : ev.status === "blocked" ? C.green + "12" : "rgba(255,255,255,0.04)",
-                color: ev.status === "active" ? C.red : ev.status?.includes("revert") ? C.yellow : ev.status === "blocked" ? C.green : C.muted,
-              }}>{ev.status}</span>
+                background: ev.status === "remediated" || ev.status === "resolved" || ev.status === "blocked"
+                              ? C.green + "16"
+                          : ev.status === "active" ? C.red + "12"
+                          : ev.status?.includes("revert") ? C.yellow + "12"
+                          : "rgba(255,255,255,0.04)",
+                color:      ev.status === "remediated" || ev.status === "resolved" || ev.status === "blocked"
+                              ? C.green
+                          : ev.status === "active" ? C.red
+                          : ev.status?.includes("revert") ? C.yellow
+                          : C.muted,
+              }}>{ev.status === "remediated" ? "✓ remediated" : ev.status}</span>
             </div>
           </div>
         ))}

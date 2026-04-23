@@ -251,9 +251,19 @@ async def get_churn_risk():
     return {"risks": risks}
 
 
+_deploying_proposals: set = set()
+
 @app.post("/api/config-proposals/{proposal_id}/approved")
 @app.post("/api/config-proposals/{proposal_id}/approve")
 async def approve_proposal(proposal_id: str, body: ProposalAction = ProposalAction()):
+    # Idempotency guard: dashboard posts to both /approved and /approve and
+    # occasional retries / double-clicks would otherwise spawn stream_approval
+    # twice — which creates duplicate PRs and duplicate "Config Deployed"
+    # emails. First write wins; later calls just return the current status.
+    if proposal_id in _deploying_proposals:
+        return {"success": True, "proposal_id": proposal_id, "status": "already_deploying"}
+    _deploying_proposals.add(proposal_id)
+
     result = update_proposal_status(proposal_id, "approved")
     # Mark fault as resolved — do NOT clear fault signature here.
     # Clearing it would cause ORCA to re-propose on the next analyze cycle.
@@ -490,6 +500,27 @@ Actions taken:
             subject=f"✅ ORCA Config Deployed — {commit_title} | PR #{pr_number}",
             body=email_body
         )
+
+        # If this was a security revert, mark the linked alert as remediated
+        # so the Security tab stops showing it as "active".
+        if proposal.get("security") and proposal.get("alert_id"):
+            from agent.te_agent import _security_alerts
+            alert_id = proposal.get("alert_id")
+            remediated_alert = None
+            for a in _security_alerts:
+                if a.get("id") == alert_id:
+                    a["status"] = "remediated"
+                    a["remediated_at"] = datetime.utcnow().isoformat()
+                    a["remediation_pr_url"] = pr_url
+                    a["remediation_pr_number"] = pr_number
+                    remediated_alert = a
+                    break
+            if remediated_alert:
+                await manager.broadcast({
+                    "type": "security_alert",
+                    "timestamp": datetime.utcnow().isoformat(),
+                    "data": {"alert": remediated_alert},
+                })
 
         await manager.broadcast({
             "type": "agent_status", "timestamp": datetime.utcnow().isoformat(),
