@@ -1,169 +1,134 @@
 # ORCA — Autonomous Network Operations & Response Agent
 
-AI-native network operations platform. Monitors IP/MPLS networks, enforces traffic engineering objectives, generates and pushes vendor configs, and communicates autonomously with ops teams and vendors.
+---
+
+## ⚠️ FOR ANY AI ASSISTANT WORKING ON THIS REPO
+
+**STOP. Read this before writing a single line of code.**
+
+This project has detailed skill and spec files that capture every architectural decision, data structure, key name, deployment pattern, and known bug fix. Ignoring them will reproduce bugs that have already been fixed and break things that already work.
+
+### Mandatory reading order — every session, no exceptions:
+
+```
+1. docs/ORCA-SESSION.md       ← Start here. Current IP, last changes, known issues, how to fetch files
+2. docs/ORCA-SPEC.md          ← Architecture, API endpoints, data structures, use cases
+3. docs/ORCA-DEPLOY.skill.md  ← Deployment rules (patch vs rebuild, cloud-init pattern)
+4. docs/ORCA-FRONTEND.skill.md ← Dashboard components, event types, Python 3.11 compat
+5. docs/ORCA-AGENT.skill.md   ← Tools, approval flow, system prompt, stores
+```
+
+### Then fetch the live source files before touching them:
+
+```python
+import urllib.request, json, base64
+
+token = "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"
+headers = {"Authorization": f"token {token}", "Accept": "application/vnd.github.v3+json"}
+
+def fetch(path):
+    req = urllib.request.Request(
+        f"https://api.github.com/repos/sireenmalik/orca/contents/{path}", headers=headers)
+    with urllib.request.urlopen(req) as r:
+        d = json.loads(r.read())
+    content = base64.b64decode(d['content']).decode()
+    local = f'/home/claude/{path.split("/")[-1]}'
+    with open(local, 'w') as f: f.write(content)
+    print(f"✅ {path} ({len(content)//1024}KB sha:{d['sha'][:8]})")
+
+fetch("api/main.py")
+fetch("agent/te_agent.py")
+fetch("agent/adapter.py")
+fetch("agent/notifications.py")
+fetch("dashboard/src/App.jsx")
+```
+
+**Never edit from memory. Never assume file content. Always fetch first.**
+
+### Critical rules that burn sessions if ignored:
+
+| Rule | Why |
+|------|-----|
+| Patch = `git pull && docker-compose restart` | Never destroy droplet for code changes |
+| Both `/approved` AND `/approve` routes must exist | Frontend posts to `/approved`, missing it silently does nothing |
+| Agent sends `device` key in changes, not `node` | Wrong key = "Router" tab, "metric old/new" placeholders |
+| Python 3.11: no backslash inside f-string expressions | SyntaxError crash, container restart loop |
+| `validation_checks` (bool) + `validation_detail` (string) are separate keys | Merging them breaks the modal and the PR body |
+| `send_email()` already queues — don't call a separate `queue_email()` | Doesn't exist, causes ImportError |
+| DO API returns 503 occasionally | Retry up to 5 times with 20s sleep |
+
+### After every session — update `docs/ORCA-SESSION.md`:
+- New droplet IP
+- Last 5 changes made
+- Any new known issues
 
 ---
 
-## Architecture
+## What ORCA Is
 
+AI-native network operations platform using Claude Sonnet as its reasoning engine. Three live use cases:
+
+1. **Network Operations** — autonomous fault detection, CSPF rerouting, config proposal with human approval, GitHub PR + episode audit trail
+2. **Security** — unauthorized config change detection, evidence archival to Git, human-gated revert, CISA AA24-038A threat intel mapping
+3. **Churn Forecast** — live SLA risk scoring per customer LSP, logistic churn model, counterfactual revenue protection
+
+### The Two Missions
+- **Mission 1** — All link utilization below 90% (hard constraint)
+- **Mission 2** — Minimize maximum utilization across all links (objective)
+
+### Architecture
 ```
-orca/
-├── skills/
-│   ├── persistent/     # Hard constraints, safety rules, objective functions (immutable)
-│   ├── past/           # Episodic memory — learned from outcomes (grows over time)
-│   └── future/         # Scenario plans, pre-computed responses (updated nightly)
-│
-├── specs/
-│   ├── network/        # Network topology specs (YAML) — source of truth
-│   ├── lsp/            # LSP definitions and policies
-│   └── policy/         # Operator rules, notification config, autonomy level
-│
-├── agent/
-│   ├── orca_agent.py   # Main reasoning loop (Claude Sonnet 4)
-│   ├── cspf.py         # CSPF path computation algorithm
-│   └── memory.py       # Three-layer memory loader
-│
-├── adapters/
-│   ├── base.py         # NetworkAdapter abstract interface
-│   ├── containerlab.py # Demo adapter (simulated)
-│   ├── nokia.py        # Nokia SR-OS via gNMI/NETCONF
-│   ├── cisco.py        # Cisco IOS-XR via gNMI/NETCONF
-│   └── juniper.py      # Juniper Junos via NETCONF
-│
-├── config_mgmt/
-│   ├── templates/      # Vendor config templates (Nokia, Cisco, Juniper)
-│   ├── renderers/      # Spec → config renderers
-│   ├── validators/     # Pre-push validation
-│   └── diff/           # Desired vs running config diff engine
-│
-├── memory/
-│   ├── episodic/       # Past action records (YAML + DB index)
-│   ├── instructional/  # Operator rules loaded at runtime
-│   └── learned/        # Preference models built from outcomes
-│
-├── api/
-│   └── main.py         # FastAPI backend + WebSocket
-│
-├── dashboard/
-│   └── src/App.jsx     # React + D3 real-time dashboard
-│
-└── tests/              # Spec validation, adapter tests, CSPF tests
+Frontend    React + D3 + Vite          dashboard/src/App.jsx
+Backend     FastAPI + WebSocket         api/main.py
+Agent       Claude Sonnet              agent/te_agent.py
+Adapter     ContainerlabAdapter        agent/adapter.py
+Notify      SendGrid + mailto queue    agent/notifications.py
+Network     Simulated 6-node ring      ContainerlabAdapter
 ```
 
----
-
-## Objective Functions
-
-**Mission 1 — Feasibility (hard constraint)**
-```
-∀ link l : utilization(l) < 90%
-```
-
-**Mission 2 — Optimality (objective)**
-```
-min( max utilization across all links )
-```
-
----
-
-## Decision Architecture
-
-| Task | Method | Rationale |
-|---|---|---|
-| Path computation | CSPF algorithm | Provably optimal, sub-millisecond |
-| Candidate selection | ORCA reasoning | Business context, operator policy, history |
-| Config generation | Vendor templates | Deterministic, reproducible |
-| Decision to act | ORCA reasoning | Judgment, novel fault handling |
-| Verification | Math threshold checks | Objective, unambiguous |
-
----
-
-## Vendor Support
-
-| Vendor | Telemetry | Config Push | Status |
-|---|---|---|---|
-| Nokia SR-OS | gNMI | NETCONF | In development |
-| Cisco IOS-XR | gNMI | NETCONF/gRPC | Planned |
-| Juniper Junos | gNMI/JTI | NETCONF | Planned |
-| Containerlab | Simulated | Simulated | ✅ Demo ready |
+Full architecture, API endpoints, data structures, and use case flows: **`docs/ORCA-SPEC.md`**
 
 ---
 
 ## Quick Start
 
 ```bash
-# Clone
-git clone https://github.com/your-org/orca.git
+git clone https://github.com/sireenmalik/orca.git
 cd orca
-
-# Configure
 cp .env.example .env
-# Edit .env — add ANTHROPIC_API_KEY, network adapter, SMTP config
+# Edit .env — add ANTHROPIC_API_KEY, GITHUB_TOKEN, OPS_EMAIL
 
-# Point at your network
-export NETWORK_ADAPTER=nokia          # or containerlab, cisco, juniper
-export NETWORK_SPEC=specs/network/nokia-lab-sfo2.yaml
+docker build -f Dockerfile.api -t orca_api:latest .
+docker-compose --env-file .env up -d
 
-# Run
-docker-compose up -d
-
-# Dashboard
 open http://localhost
 ```
 
 ---
 
-## Reproducibility
+## Docs
 
-Every deployment is fully reproducible from specs alone:
-
-```bash
-# Regenerate all configs from specs
-python -m config_mgmt.renderers.render --spec specs/network/nokia-lab-sfo2.yaml
-
-# Validate all specs
-python -m tests.validate_specs
-
-# Run CSPF against all failure scenarios
-python -m agent.cspf --spec specs/network/nokia-lab-sfo2.yaml --scenario all-failures
-
-# Diff desired vs running config
-python -m config_mgmt.diff --device R1 --spec specs/lsp/nokia-lab-sfo2-lsps.yaml
-```
+| File | Purpose |
+|------|---------|
+| `docs/ORCA-SESSION.md` | **Start here** — current state, live IP, demo script |
+| `docs/ORCA-SPEC.md` | Master spec — architecture, API, data structures |
+| `docs/ORCA-DEPLOY.skill.md` | Deployment rules and patterns |
+| `docs/ORCA-FRONTEND.skill.md` | Dashboard development rules |
+| `docs/ORCA-AGENT.skill.md` | Agent tools, flows, system prompt |
 
 ---
 
-## Branching Strategy
+## Vendor Support
 
-```
-main          ← production-ready, tagged releases
-develop       ← integration branch
-feature/*     ← new features
-fix/*         ← bug fixes
-scenario/*    ← new scenario specs and pre-computed plans
-adapter/*     ← new vendor adapter development
-```
-
-Config specs follow the same branching — a new LSP spec goes through `feature/lsp-customer-c`, reviewed, merged to develop, tested, merged to main, and then pushed to production.
-
----
-
-## Memory Layers
-
-| Layer | Contents | Updated |
-|---|---|---|
-| Persistent | Safety rules, objective functions | Never (requires code review) |
-| Past | Episode records, outcomes, overrides | After every action cycle |
-| Future | Scenario plans, pre-computed paths | Nightly planning cycle |
+| Vendor | Status |
+|--------|--------|
+| Containerlab (simulated) | ✅ Live |
+| Nokia SR-OS (gNMI/NETCONF) | 🔲 Next |
+| Cisco IOS-XR | 🔲 Planned |
+| Juniper Junos | 🔲 Planned |
 
 ---
 
 ## Built With
 
-- **Reasoning**: Claude Sonnet 4 (Anthropic)
-- **Path computation**: CSPF (custom implementation)
-- **Backend**: FastAPI + WebSocket
-- **Dashboard**: React + D3
-- **Config push**: NETCONF / gRPC
-- **Telemetry**: gNMI / OpenConfig
-- **Infrastructure**: DigitalOcean / any cloud or on-prem
+Claude Sonnet 4 · FastAPI · React · D3 · DigitalOcean · GitHub
