@@ -109,7 +109,7 @@ function TopologyMap({ nodes, links }) {
     svg.append("g").selectAll("text").data(linkData).enter().append("text")
       .attr("x", d => (d.s.x + d.t.x) / 2).attr("y", d => (d.s.y + d.t.y) / 2 - 7)
       .attr("text-anchor", "middle").attr("fill", d => d.state === "down" ? C.red : utilColor(d.util))
-      .attr("font-size", Math.max(9, fs * 0.75) + "px").attr("font-family", "monospace").attr("font-weight", "bold")
+      .attr("font-size", "13px").attr("font-family", "monospace").attr("font-weight", "bold")
       .text(d => d.state === "down" ? "DOWN" : `${d.util.toFixed(0)}%`);
     svg.append("g").selectAll("circle").data(nodeData).enter().append("circle")
       .attr("cx", d => d.x).attr("cy", d => d.y).attr("r", nodeR + 8).attr("fill", "none")
@@ -1529,4 +1529,5 @@ export default function App() {
     </div>
   );
 }
+
 
