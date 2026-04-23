@@ -127,7 +127,7 @@ function TopologyMap({ nodes, links }) {
     svg.append("g").selectAll("text").data(linkData).enter().append("text")
       .attr("x", d => (d.s.x + d.t.x) / 2).attr("y", d => (d.s.y + d.t.y) / 2 - 7)
       .attr("text-anchor", "middle").attr("fill", d => d.state === "down" ? C.red : utilColor(d.util))
-      .attr("font-size", "15px").attr("font-family", "monospace").attr("font-weight", "bold")
+      .attr("font-size", "17px").attr("font-family", "monospace").attr("font-weight", "bold")
       .text(d => d.state === "down" ? "DOWN" : `${d.util.toFixed(0)}%`);
     svg.append("g").selectAll("circle").data(nodeData).enter().append("circle")
       .attr("cx", d => d.x).attr("cy", d => d.y).attr("r", nodeR + 8).attr("fill", "none")
@@ -1230,16 +1230,31 @@ function ChurnTab({ events }) {
   const bandColor = { healthy: C.green, watch: C.yellow, at_risk: C.orange, critical: C.red };
   const riskList = Object.values(risks);
 
-  // Churn history chart data (static baseline + dynamic risk)
-  const all = [...churnHistory.map(d => ({ m: d.m })), ...churnForecast.map(d => ({ m: d.m }))];
+  // Live current churn rate — avg across LSPs, falls back to trailing history
+  const liveProbs = riskList.map(r => r.churn_probability_pct || 0);
+  const liveChurn = liveProbs.length
+    ? liveProbs.reduce((a,b)=>a+b,0)/liveProbs.length
+    : churnHistory[churnHistory.length-1].v;
+
+  // Replace last history point with the live value so the sparkline "now"
+  // tracks reality; rebuild forecast as a monotonic decay from live churn.
+  const liveHistory = [...churnHistory.slice(0, -1), { m: churnHistory[churnHistory.length-1].m, v: liveChurn }];
+  const liveForecast = churnForecast.map((f, i) => {
+    const base = liveChurn * (1 - (i + 1) * 0.05);
+    const v = Math.max(base, 0.5);
+    return { m: f.m, v, lo: Math.max(v - 0.55, 0.2), hi: v + 0.55 };
+  });
+
+  // Churn history chart data
+  const all = [...liveHistory.map(d => ({ m: d.m })), ...liveForecast.map(d => ({ m: d.m }))];
   const W = 600, H = 160, pL = 35, pR = 15, pT = 15, pB = 25, pW = W-pL-pR, pH = H-pT-pB, mx = 5;
   const x = i => pL + (i/(all.length-1))*pW;
   const y = v => pT + pH - (v/mx)*pH;
-  const hPath = churnHistory.map((d,i) => `${i?'L':'M'}${x(i)},${y(d.v)}`).join('');
-  const fPath = churnForecast.map((d,i) => `${i?'L':'M'}${x(churnHistory.length+i)},${y(d.v)}`).join('');
-  const conn = `M${x(churnHistory.length-1)},${y(churnHistory[churnHistory.length-1].v)} L${x(churnHistory.length)},${y(churnForecast[0].v)}`;
-  const bandU = churnForecast.map((d,i) => `${x(churnHistory.length+i)},${y(d.hi)}`).join(' L');
-  const bandD = [...churnForecast].reverse().map((d,i) => `${x(churnHistory.length+churnForecast.length-1-i)},${y(d.lo)}`).join(' L');
+  const hPath = liveHistory.map((d,i) => `${i?'L':'M'}${x(i)},${y(d.v)}`).join('');
+  const fPath = liveForecast.map((d,i) => `${i?'L':'M'}${x(liveHistory.length+i)},${y(d.v)}`).join('');
+  const conn = `M${x(liveHistory.length-1)},${y(liveHistory[liveHistory.length-1].v)} L${x(liveHistory.length)},${y(liveForecast[0].v)}`;
+  const bandU = liveForecast.map((d,i) => `${x(liveHistory.length+i)},${y(d.hi)}`).join(' L');
+  const bandD = [...liveForecast].reverse().map((d,i) => `${x(liveHistory.length+liveForecast.length-1-i)},${y(d.lo)}`).join(' L');
 
   const drivers = [
     { d: "Network Quality < 70", pct: 34, seg: "Enterprise" },
@@ -1251,9 +1266,28 @@ function ChurnTab({ events }) {
   return (
     <div style={{ display: "flex", height: "100%", gap: 12 }}>
       <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 10, overflow: "auto" }}>
-        {/* KPIs */}
+        {/* KPIs — live from /api/churn-risk */}
         <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10, flexShrink: 0 }}>
-          {[{ l: "Current Churn", v: "3.4%", ch: "+0.2%", bad: true }, { l: "Forecast Q3", v: "2.8%", ch: "−0.6%", bad: false }, { l: "At-Risk ARR", v: "$2.9M", ch: riskList.length > 0 ? `${riskList.filter(r => r.risk_band !== "healthy").length} LSPs` : "—", bad: riskList.some(r => r.risk_band === "at_risk" || r.risk_band === "critical") }].map((c, i) => (
+          {(() => {
+            const forecastChurn = liveForecast[0].v;
+            const atRiskLSPs = riskList.filter(r => r.risk_band === "at_risk" || r.risk_band === "critical");
+            const atRiskArr = atRiskLSPs.reduce((s,r)=>s+(r.arr_usd || 0), 0);
+            const atRiskArrLabel = atRiskArr >= 1e6 ? `$${(atRiskArr/1e6).toFixed(1)}M`
+                                  : atRiskArr >= 1e3 ? `$${(atRiskArr/1e3).toFixed(0)}K`
+                                  : `$${atRiskArr.toFixed(0)}`;
+            const prevChurn = churnHistory[churnHistory.length-2].v;
+            const delta = (liveChurn - prevChurn).toFixed(1);
+            const forecastDelta = (forecastChurn - liveChurn).toFixed(1);
+            return [
+              { l: "Current Churn", v: `${liveChurn.toFixed(1)}%`,
+                ch: (delta > 0 ? "+" : "") + delta + "%", bad: liveChurn > prevChurn },
+              { l: "Forecast Q3",   v: `${forecastChurn.toFixed(1)}%`,
+                ch: (forecastDelta > 0 ? "+" : "") + forecastDelta + "%", bad: false },
+              { l: "At-Risk ARR",   v: atRiskArr > 0 ? atRiskArrLabel : "$0",
+                ch: atRiskLSPs.length > 0 ? `${atRiskLSPs.length} LSP${atRiskLSPs.length===1?"":"s"}` : "all healthy",
+                bad: atRiskLSPs.length > 0 },
+            ];
+          })().map((c, i) => (
             <div key={i} style={{ background: C.panel, border: `1px solid ${C.border}`, borderRadius: 8, padding: "12px 14px" }}>
               <div style={{ fontSize: 9, letterSpacing: 1, color: C.muted, marginBottom: 4 }}>{c.l}</div>
               <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
