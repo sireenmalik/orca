@@ -18,6 +18,29 @@ This project has detailed skill and spec files that capture every architectural 
 5. docs/ORCA-AGENT.skill.md   ← Tools, approval flow, system prompt, stores
 ```
 
+
+### Step 0 (before anything else) — Set up SSH
+
+**Do this at the start of every session. It gives you direct server access in 30 seconds.**
+
+```bash
+# Fetch and run the SSH setup script
+curl -s -H "Authorization: token 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" \
+  "https://api.github.com/repos/sireenmalik/orca/contents/scripts/setup_ssh.sh" | \
+  python3 -c "import json,sys,base64; print(base64.b64decode(json.load(sys.stdin)['content']).decode())" \
+  > /tmp/setup_ssh.sh && bash /tmp/setup_ssh.sh
+```
+
+This installs `openssh-client`, writes the deploy key to `~/.ssh/orca_deploy_key`, and prints `ORCA_IP`.
+
+Then patch in 15 seconds instead of rebuilding in 10 minutes:
+```bash
+ssh -i ~/.ssh/orca_deploy_key -o StrictHostKeyChecking=no root@$ORCA_IP \
+  'cd /opt/orca && git pull origin main && docker-compose restart && echo DONE'
+```
+
+Full SSH reference: `docs/ORCA-DEPLOY.skill.md` → **SSH Direct Access** section.
+
 ### Then fetch the live source files before touching them:
 
 ```python
