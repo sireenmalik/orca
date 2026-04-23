@@ -1,0 +1,11 @@
+# ORCA Config Proposal — R1
+# Generated: 2026-04-23T11:45:30.778606Z
+# Incident: Critical security breach detected on R1. Unauthorized SNMP read-write community and permissive ACL rule were added via NETCONF from 10.0.3.44, creating management plane exposure and access control weakening. Reverting to approved Git baseline to eliminate security vulnerabilities.
+# Branch: cfg/R1-20260423-114529
+
+configure router isis 0
+    interface "unknown"
+-       metric ?
++       metric ?
+    exit
+exit
