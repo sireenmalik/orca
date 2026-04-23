@@ -635,6 +635,160 @@ function LinkUtilPanel({ links }) {
 // ─── EMAIL CARD ───────────────────────────────────────────────────────────────
 function EmailCard({ email: e, onEdit }) {
   const [expanded, setExpanded] = useState(false);
+  const [fullscreen, setFullscreen] = useState(false);
+
+  const githubLinks = useMemo(() => {
+    const matches = (e.body || "").match(/https:\/\/github\.com\/[^\s\n"')]+/g) || [];
+    return [...new Set(matches)];
+  }, [e.body]);
+
+  const renderBody = (text) => {
+    const parts = text.split(/(https?:\/\/[^\s\n"')]+)/g);
+    return parts.map((part, i) =>
+      part.match(/^https?:\/\//) ? (
+        <a key={i} href={part} target="_blank" rel="noreferrer"
+          style={{ color: C.blue, textDecoration: "underline", wordBreak: "break-all" }}>
+          {part}
+        </a>
+      ) : <span key={i}>{part}</span>
+    );
+  };
+
+  const LinkButtons = () => githubLinks.length > 0 ? (
+    <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 8 }}>
+      {githubLinks.map((url, i) => {
+        const label = url.includes("/pull/") ? `🔀 PR #${url.split("/pull/")[1]?.split("/")[0]}`
+                    : url.includes("/episodes") ? "📚 Episode"
+                    : url.includes("/security") ? "🔐 Evidence"
+                    : "🔗 GitHub";
+        return (
+          <a key={i} href={url} target="_blank" rel="noreferrer" style={{
+            padding: "4px 12px", borderRadius: 4, fontSize: 11, fontWeight: 600,
+            background: C.blue + "18", border: `1px solid ${C.blue}44`,
+            color: C.blue, textDecoration: "none",
+          }}>{label}</a>
+        );
+      })}
+    </div>
+  ) : null;
+
+  const isDeployed = e.subject?.includes("Deployed") || e.subject?.includes("Config");
+  const isSecurity = e.subject?.includes("SECURITY") || e.subject?.includes("security");
+  const borderColor = isSecurity ? C.red : isDeployed ? C.green : C.yellow;
+
+  return (
+    <>
+      {/* Full-screen modal */}
+      {fullscreen && (
+        <div style={{
+          position: "fixed", inset: 0, background: "rgba(0,0,0,0.85)", zIndex: 2000,
+          display: "flex", alignItems: "center", justifyContent: "center", padding: 24,
+        }} onClick={() => setFullscreen(false)}>
+          <div onClick={ev => ev.stopPropagation()} style={{
+            background: C.panel, border: `1px solid ${C.border}`, borderRadius: 12,
+            width: "min(860px, 96vw)", maxHeight: "90vh", display: "flex", flexDirection: "column",
+            boxShadow: "0 32px 80px rgba(0,0,0,0.9)",
+          }}>
+            {/* Modal header */}
+            <div style={{ padding: "16px 20px", borderBottom: `1px solid ${C.border}`, display: "flex", justifyContent: "space-between", alignItems: "start", flexShrink: 0 }}>
+              <div>
+                <div style={{ fontSize: 10, color: C.muted, fontFamily: "monospace", marginBottom: 4 }}>To: {e.to}</div>
+                <div style={{ fontSize: 15, fontWeight: 700, color: C.text, lineHeight: 1.3 }}>{e.subject}</div>
+              </div>
+              <button onClick={() => setFullscreen(false)} style={{ background: "transparent", border: "none", color: C.muted, fontSize: 22, cursor: "pointer", marginLeft: 16, flexShrink: 0 }}>×</button>
+            </div>
+            {/* Full scrollable body */}
+            <div style={{ flex: 1, overflow: "auto", padding: "20px 24px", background: "#0a0f1e" }}>
+              <pre style={{ margin: 0, fontSize: 13, color: C.text, lineHeight: 1.8, fontFamily: "monospace", whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
+                {renderBody(e.body || "")}
+              </pre>
+            </div>
+            {/* Modal footer */}
+            <div style={{ padding: "14px 20px", borderTop: `1px solid ${C.border}`, display: "flex", gap: 10, alignItems: "center", flexShrink: 0, flexWrap: "wrap" }}>
+              <LinkButtons />
+              <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
+                <a href={e.mailto || `mailto:${e.to}?subject=${encodeURIComponent(e.subject)}&body=${encodeURIComponent((e.body||"").slice(0,1800))}`}
+                  style={{ padding: "7px 16px", borderRadius: 6, fontSize: 12, fontWeight: 600, background: C.green + "18", border: `1px solid ${C.green}44`, color: C.green, textDecoration: "none" }}>
+                  ✉ Open in Mail
+                </a>
+                <button onClick={() => { setFullscreen(false); onEdit(); }} style={{ padding: "7px 16px", borderRadius: 6, fontSize: 12, fontWeight: 600, background: "rgba(255,255,255,0.04)", border: `1px solid ${C.border}`, color: C.muted, cursor: "pointer" }}>
+                  ✏ Edit
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Card */}
+      <div style={{ background: "rgba(255,255,255,0.02)", border: `1px solid ${C.border}`, borderRadius: 8, marginBottom: 8, borderLeft: `3px solid ${borderColor}`, overflow: "hidden" }}>
+        {/* Header — click to expand inline, double-click or button to fullscreen */}
+        <div onClick={() => setExpanded(!expanded)} style={{ padding: "10px 12px", cursor: "pointer" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start" }}>
+            <div style={{ flex: 1, marginRight: 8 }}>
+              <div style={{ fontSize: 10, color: C.muted, fontFamily: "monospace", marginBottom: 3 }}>To: {e.to}</div>
+              <div style={{ fontSize: 12, fontWeight: 600, color: C.text }}>{e.subject}</div>
+            </div>
+            <div style={{ display: "flex", gap: 6, alignItems: "center", flexShrink: 0 }}>
+              <button onClick={ev => { ev.stopPropagation(); setFullscreen(true); }} style={{
+                padding: "2px 8px", borderRadius: 4, fontSize: 9, fontWeight: 700, cursor: "pointer",
+                background: C.blue + "18", border: `1px solid ${C.blue}44`, color: C.blue,
+              }}>⤢ View</button>
+              <span style={{ fontSize: 9, color: C.muted }}>{expanded ? "▲" : "▼"}</span>
+            </div>
+          </div>
+          {!expanded && (
+            <div style={{ fontSize: 11, color: C.muted, marginTop: 4, lineHeight: 1.4 }}>
+              {(e.body || "").slice(0, 100).replace(/\n/g, " ")}...
+            </div>
+          )}
+        </div>
+
+        {/* Inline expanded */}
+        {expanded && (
+          <div style={{ borderTop: `1px solid ${C.border}` }}>
+            <div style={{ padding: "10px 12px", maxHeight: 220, overflow: "auto", background: "#0a0f1e" }}>
+              <pre style={{ margin: 0, fontSize: 11, color: C.text, lineHeight: 1.7, fontFamily: "monospace", whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
+                {renderBody(e.body || "")}
+              </pre>
+            </div>
+            {githubLinks.length > 0 && (
+              <div style={{ padding: "8px 12px", borderTop: `1px solid ${C.border}`, display: "flex", gap: 6, flexWrap: "wrap" }}>
+                {githubLinks.map((url, i) => {
+                  const label = url.includes("/pull/") ? `🔀 PR #${url.split("/pull/")[1]?.split("/")[0]}`
+                              : url.includes("/episodes") ? "📚 Episode"
+                              : url.includes("/security") ? "🔐 Evidence"
+                              : "🔗 GitHub";
+                  return (
+                    <a key={i} href={url} target="_blank" rel="noreferrer" style={{
+                      padding: "3px 9px", borderRadius: 4, fontSize: 10, fontWeight: 600,
+                      background: C.blue + "18", border: `1px solid ${C.blue}44`,
+                      color: C.blue, textDecoration: "none",
+                    }}>{label}</a>
+                  );
+                })}
+              </div>
+            )}
+            <div style={{ padding: "8px 12px", borderTop: `1px solid ${C.border}`, display: "flex", gap: 6 }}>
+              <a href={e.mailto || `mailto:${e.to}?subject=${encodeURIComponent(e.subject)}&body=${encodeURIComponent((e.body||"").slice(0,1800))}`}
+                style={{ padding: "4px 10px", borderRadius: 4, fontSize: 10, fontWeight: 600, background: C.green + "18", border: `1px solid ${C.green}44`, color: C.green, textDecoration: "none" }}>
+                ✉ Open in Mail
+              </a>
+              <button onClick={ev => { ev.stopPropagation(); setFullscreen(true); }} style={{ padding: "4px 10px", borderRadius: 4, fontSize: 10, fontWeight: 600, background: C.blue + "18", border: `1px solid ${C.blue}44`, color: C.blue, cursor: "pointer" }}>
+                ⤢ Full Screen
+              </button>
+              <button onClick={ev => { ev.stopPropagation(); onEdit(); }} style={{ padding: "4px 10px", borderRadius: 4, fontSize: 10, fontWeight: 600, background: "rgba(255,255,255,0.04)", border: `1px solid ${C.border}`, color: C.muted, cursor: "pointer" }}>
+                ✏ Edit
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    </>
+  );
+}
+
+
 
   // Extract GitHub links from body
   const githubLinks = useMemo(() => {
