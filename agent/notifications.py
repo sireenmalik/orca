@@ -91,17 +91,20 @@ def send_email(to: str, subject: str, body: str, **kwargs) -> dict:
         email_record["sent"] = False
         email_record["message"] = "Ready — click Open in Mail Client"
 
-    # Deduplicate — skip if identical subject sent in last 10 minutes
-    now = time.time()
-    for existing in _email_queue:
-        if existing["subject"] == email_record["subject"]:
-            try:
-                existing_time = __import__('datetime').datetime.fromisoformat(existing["timestamp"]).timestamp()
-                if now - existing_time < 600:  # 10 minute window
-                    return {"success": True, "email_id": existing["id"],
-                            "mailto": existing["mailto"], "message": "Deduplicated — same subject sent recently",
-                            "to": to, "subject": subject}
-            except: pass
+    # Deduplicate — skip only if EXACT same subject sent in last 5 minutes
+    # Never deduplicate emails containing PR links or episode references
+    is_unique = any(kw in subject for kw in ["PR #", "Episode", "Evidence", "Deployed", "security:"])
+    if not is_unique:
+        now = time.time()
+        for existing in _email_queue:
+            if existing["subject"] == email_record["subject"]:
+                try:
+                    existing_time = __import__('datetime').datetime.fromisoformat(existing["timestamp"]).timestamp()
+                    if now - existing_time < 300:  # 5 minute window (was 10)
+                        return {"success": True, "email_id": existing["id"],
+                                "mailto": existing["mailto"], "message": "Deduplicated — same subject sent recently",
+                                "to": to, "subject": subject}
+                except: pass
 
     _email_queue.append(email_record)
     return {"success": True, "email_id": email_record["id"],
@@ -122,3 +125,4 @@ def build_tac_email(vendor: str, fault_data: dict) -> str:
     }
     defaults.update(fault_data)
     return template.format(**defaults)
+
