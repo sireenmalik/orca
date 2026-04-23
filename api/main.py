@@ -255,7 +255,10 @@ async def get_churn_risk():
 @app.post("/api/config-proposals/{proposal_id}/approve")
 async def approve_proposal(proposal_id: str, body: ProposalAction = ProposalAction()):
     result = update_proposal_status(proposal_id, "approved")
-    agent.reset_fault_signature()
+    # Mark fault as resolved — do NOT clear fault signature here.
+    # Clearing it would cause ORCA to re-propose on the next analyze cycle.
+    # The signature is cleared automatically when the network heals (no more down links/alarms).
+    agent._proposal_approved = True  # suppress re-proposal for current fault
 
     all_proposals = get_config_proposals()
     proposal = next((p for p in all_proposals if str(p.get("id")) == str(proposal_id)), {})
@@ -543,6 +546,7 @@ async def debug_env():
 dashboard_path = "/opt/orca/dashboard/dist"
 if os.path.exists(dashboard_path):
     app.mount("/", StaticFiles(directory=dashboard_path, html=True), name="static")
+
 
 
 
