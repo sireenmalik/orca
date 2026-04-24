@@ -155,6 +155,134 @@ SCENARIOS = {
 }
 
 
+# ─── Proposal templates ──────────────────────────────────────────────────────
+#
+# Each scenario's conclusion triggers auto-creation of one proposal from
+# these templates. The workflow chassis (agent/v2_proposals.py) handles
+# id generation, validation-gate normalisation, and PR creation on approve.
+# Post-approval scenario-specific recovery log entries are emitted from
+# v2_proposals._deploy() when ``triggering_scenario_id`` is set.
+
+SCENARIO_PROPOSAL_TEMPLATES = {
+    "slice-a-qos-drift": {
+        "title": "Slice-A QoS protection on UPF-01",
+        "reason": (
+            "Dual root cause on slice-A: (1) load-balancer session skew concentrates the "
+            "enterprise cohort on UPF-01 with UPF-02 carrying zero slice-A sessions, "
+            "(2) QER enforcement on UPF-01 priority class has drifted -36% from intent "
+            "(50 → 32 Mbps GBR). Combined effect: p99 N3 latency climbing 11.2ms → trending "
+            "toward 15ms SLA breach in ~4 minutes. Single-cause fix will not hold — both "
+            "changes must ship atomically."
+        ),
+        "projected_impact": (
+            "p99 N3 latency returns to ~9ms · slice-A SLA breach risk eliminated for 842 "
+            "enterprise subscribers · $2.4M enterprise ARR cohort protected"
+        ),
+        "diff": [
+            {"type": "context", "line": "upf-01:"},
+            {"type": "context", "line": "  qer_profiles:"},
+            {"type": "context", "line": "    slice-a-priority:"},
+            {"type": "context", "line": "      intent_gbr_mbps: 50"},
+            {"type": "remove",  "line": "      enforced_mbps: 32       # DRIFT -36% from intent"},
+            {"type": "add",     "line": "      enforced_mbps: 50       # restored to intent"},
+            {"type": "add",     "line": "      enforcement_mode: strict"},
+            {"type": "context", "line": "  pfcp_sessions:"},
+            {"type": "context", "line": "    slice-A:"},
+            {"type": "remove",  "line": "      high_bw_count: 637      # concentration on UPF-01"},
+            {"type": "add",     "line": "      high_bw_count: 457      # 180 sessions migrated to UPF-02"},
+            {"type": "context", "line": "upf-02:"},
+            {"type": "context", "line": "  pfcp_sessions:"},
+            {"type": "context", "line": "    slice-A:"},
+            {"type": "remove",  "line": "      high_bw_count: 0"},
+            {"type": "add",     "line": "      high_bw_count: 180      # balanced tail-distribution"},
+        ],
+        "validation_gates": [
+            {"name": "Syntax",                "status": "pass",
+             "detail": "Candidate YAML schema-valid · SR Linux / CNF parser clean"},
+            {"name": "Semantic",              "status": "pass",
+             "detail": "All referenced UPFs, slices, and PFCP session groups exist"},
+            {"name": "Mission · utilization", "status": "pass",
+             "detail": "Post-change link utilization stays under 90% on all paths"},
+            {"name": "Mission · slice SLA",   "status": "pass",
+             "detail": "Slice-A p99 projected 8.9ms, well within 15ms SLA threshold"},
+            {"name": "Digital twin",          "status": "pass",
+             "detail": "60s traffic replay against candidate: no SLA breach, no session drop"},
+            {"name": "Policy",                "status": "pass",
+             "detail": "Change stays within approved QER enforcement policy envelope"},
+        ],
+        "triggering_incident_id": "slice-a-qos-drift",
+    },
+
+    "transport-congestion-upf-innocent": {
+        "title": "Slice-A session migration off congested LSP-1",
+        "reason": (
+            "Transport layer congestion on PE-01 ↔ P-02 (93% utilization, microbursts) is "
+            "upstream of UPF-01 and causing slice-A p99 N3 latency to climb toward SLA "
+            "breach. ORCA has read-only access to transport — no direct fix available at "
+            "the MPLS layer. Nokia-domain workaround: re-anchor slice-A sessions via an "
+            "alternate PFCP path that bypasses the congested LSP-1. Parallel action: TAC "
+            "email drafted to operator transport team with evidence + three suggested "
+            "transport-side resolutions."
+        ),
+        "projected_impact": (
+            "Slice-A traffic bypasses PE-01 ↔ P-02 congestion · p99 N3 latency recovers "
+            "to ~9ms · enterprise SLA preserved until operator resolves upstream transport "
+            "congestion · Nokia core impact fully contained"
+        ),
+        "diff": [
+            {"type": "context", "line": "upf-01:"},
+            {"type": "context", "line": "  pfcp_sessions:"},
+            {"type": "context", "line": "    slice-A:"},
+            {"type": "context", "line": "      anchor_path: via-LSP-1"},
+            {"type": "remove",  "line": "      high_bw_count: 612      # on congested LSP-1 path"},
+            {"type": "add",     "line": "      high_bw_count: 432      # 180 sessions re-anchored"},
+            {"type": "context", "line": "  session_migration_override:"},
+            {"type": "add",     "line": "    slice-A:"},
+            {"type": "add",     "line": "      target_count: 180"},
+            {"type": "add",     "line": "      alternate_path: via-LSP-2"},
+            {"type": "add",     "line": "      rationale: 'LSP-1 PE-01↔P-02 at 93% — bypass'"},
+            {"type": "add",     "line": "      ttl_hours: 6           # auto-revert when transport resolved"},
+            {"type": "context", "line": "notifications:"},
+            {"type": "add",     "line": "  tac_email:"},
+            {"type": "add",     "line": "    vendor: operator_transport_team"},
+            {"type": "add",     "line": "    subject: 'Slice-A N3 impact · LSP-1 PE-01↔P-02 congestion'"},
+        ],
+        "validation_gates": [
+            {"name": "Syntax",                "status": "pass",
+             "detail": "Candidate YAML schema-valid · PFCP override block syntax clean"},
+            {"name": "Semantic",              "status": "pass",
+             "detail": "Alternate path via LSP-2 is up and has headroom"},
+            {"name": "Mission · utilization", "status": "pass",
+             "detail": "Post-migration: LSP-2 peak util projected 61%, still under 90%"},
+            {"name": "Mission · slice SLA",   "status": "pass",
+             "detail": "Slice-A p99 projected 9.1ms · slice-B path unaffected"},
+            {"name": "Digital twin",          "status": "pass",
+             "detail": "60s replay under current transport congestion: slice-A recovers, no collateral"},
+            {"name": "Policy",                "status": "pass",
+             "detail": "Session-migration override is TTL-bounded · auto-reverts in 6h"},
+        ],
+        "triggering_incident_id": "transport-congestion-upf-innocent",
+    },
+}
+
+
+# Scenario-specific post-deploy recovery log entries, streamed sequentially
+# (200-400ms between) after /api/proposals/{id}/approve completes the
+# deploy simulation. Rendered with type="recovered" for green styling.
+SCENARIO_RECOVERY_ENTRIES = {
+    "slice-a-qos-drift": [
+        {"delay_ms": 200, "content": "QER update on UPF-01 committed · slice-A priority class now enforcing GBR 50 Mbps"},
+        {"delay_ms": 300, "content": "PFCP session modification batch complete · 180 slice-A sessions re-anchored to UPF-02 over 6.2 seconds · user-plane continuity preserved"},
+        {"delay_ms": 400, "content": "Slice-A p99 N3 latency recovered: 13.1 ms → 8.9 ms · SLA headroom restored"},
+    ],
+    "transport-congestion-upf-innocent": [
+        {"delay_ms": 200, "content": "PFCP session modification batch complete · 180 slice-A sessions re-routed via alternate path · bypassing congested LSP-1"},
+        {"delay_ms": 300, "content": "TAC email dispatched to operator transport team · awaiting external resolution of PE-01 ↔ P-02 congestion"},
+        {"delay_ms": 400, "content": "Nokia-domain impact contained · slice-A p99 N3 latency recovered"},
+    ],
+}
+
+
 # ─── Playback engine ─────────────────────────────────────────────────────────
 #
 # A single module-level task holds the current playback. New inject cancels
@@ -251,6 +379,38 @@ async def _play(scenario: dict, broadcast, adapter) -> None:
         })
 
     try:
+        # ── Auto-create the scenario's config proposal ────────────────
+        # 400ms breath after the final conclusion line so the audience's
+        # eye can land on it before the proposal card slides in. This is
+        # THE demo money-shot beat — do not remove without a UX review.
+        template = SCENARIO_PROPOSAL_TEMPLATES.get(scenario["id"])
+        if template:
+            await asyncio.sleep(0.4)
+            # Late-import to avoid a circular import at module load time.
+            from agent import v2_proposals
+            payload = dict(template)
+            payload.setdefault("triggering_incident_id", scenario["id"])
+            created = v2_proposals.create_proposal(payload)
+            # Also stash the scenario id so post-approval recovery
+            # entries can key off it.
+            created["triggering_scenario_id"] = scenario["id"]
+            # System-type reasoning log entry announcing the proposal.
+            msg = f"Config proposal created · ID {created['id']} · awaiting human approval"
+            if scenario["id"] == "transport-congestion-upf-innocent":
+                msg = f"Config proposal created · ID {created['id']} · TAC email queued · awaiting human approval"
+            await broadcast({
+                "type":      "scenario_log",
+                "timestamp": datetime.utcnow().isoformat(),
+                "data": {
+                    "seq":         -1,
+                    "subtype":     "system",
+                    "content":     msg,
+                    "is_conclusion": False,
+                    "scenario_id": scenario["id"],
+                    "proposal_id": created["id"],
+                },
+            })
+
         # Let the background state patches finish before signalling
         # completion (some mutations are scheduled late in the window).
         if state_tasks:

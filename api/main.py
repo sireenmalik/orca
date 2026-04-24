@@ -133,6 +133,7 @@ async def reset_network():
                              reset_baseline=_reset_to_baseline)
     _reset_to_baseline()
     v2_proposals.clear_proposals()
+    clear_emails()  # demo rerun hygiene
     asyncio.create_task(_broadcast_state())
     return {"status": "reset", "message": "Network reset to baseline"}
 
@@ -169,6 +170,7 @@ async def reset_scenarios():
         reset_baseline=_reset_to_baseline,
     )
     v2_proposals.clear_proposals()
+    clear_emails()  # demo rerun hygiene (will be populated in Prompt 6)
     asyncio.create_task(_broadcast_state())
     return {**r, "state": "baseline"}
 

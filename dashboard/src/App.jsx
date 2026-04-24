@@ -578,15 +578,19 @@ const logTypeStyle = {
   scenario_stopped:   { bg: "#64748b18", color: C.muted,  label: "■ STOPPED" },
 };
 
-// v2 scenario playback — five reasoning-log subtypes, each with its own
-// colored indicator dot + label. `conclude` is rendered bolder/larger and
-// gets a one-time pulse on mount. Matches the scenario script vocabulary.
+// v2 scenario playback — reasoning-log subtypes, each with its own
+// colored indicator dot + label. `conclude` renders bolder/larger with
+// a one-time pulse on mount. `system` is a muted operational marker
+// (proposal created, etc). `recovered` is the green post-deploy stream
+// (QER committed, p99 recovered, etc).
 const scenarioSubtypeStyle = {
   detect:    { bg: "rgba(6,182,212,0.08)",  color: C.blue,   label: "DETECT" },
   analyze:   { bg: "rgba(139,92,246,0.08)", color: C.purple, label: "ANALYZE" },
   correlate: { bg: "rgba(249,115,22,0.10)", color: C.orange, label: "CORRELATE" },
   decide:    { bg: "rgba(16,185,129,0.08)", color: C.green,  label: "DECIDE" },
   conclude:  { bg: "rgba(234,179,8,0.12)",  color: C.yellow, label: "CONCLUDE" },
+  system:    { bg: "rgba(148,163,184,0.10)", color: C.muted, label: "SYSTEM" },
+  recovered: { bg: "rgba(16,185,129,0.12)", color: C.green,  label: "✓ RECOVERED" },
 };
 
 const LogEntry = memo(function LogEntry({ entry }) {
@@ -1346,7 +1350,7 @@ const GATE_COLOR = {
   pending: { bg: "#eab30818",    fg: C.yellow, icon: "•" },
 };
 
-function V2ProposalCard({ p, isPulsing, isDeploying, onApprove, onReject }) {
+function V2ProposalCard({ p, isPulsing, isNew, isDeploying, onApprove, onReject }) {
   const status = STATUS_STYLE[p.status] || STATUS_STYLE.pending;
   const gates  = p.validation_gates || [];
   const allPass = gates.length > 0 && gates.every(g => g.status === "pass");
@@ -1358,8 +1362,19 @@ function V2ProposalCard({ p, isPulsing, isDeploying, onApprove, onReject }) {
 
   // Subtle shadow on pending to draw attention; removed once decided.
   const shadow = p.status === "pending" ? "0 4px 16px rgba(234,179,8,0.12)" : "none";
-  // Pulse ring — animates once per status transition (see keyframes in GlobalStyles).
-  const pulseStyle = isPulsing ? { animation: "orcaPulse 800ms ease-out" } : {};
+
+  // Compose animations. `isNew` = first appearance (scenario-generated).
+  // `isPulsing` = status transition. They can coexist for the first click
+  // on a freshly-appeared card, but the entrance animation dominates the
+  // first 1.2s. Order matters — last animation in the string wins visually.
+  let animation;
+  if (isNew && isPulsing) {
+    animation = "orcaCardEnter 420ms ease-out, orcaStripePulse 800ms ease-out 420ms, orcaPulse 800ms ease-out 1200ms";
+  } else if (isNew) {
+    animation = "orcaCardEnter 420ms ease-out, orcaStripePulse 800ms ease-out 420ms";
+  } else if (isPulsing) {
+    animation = "orcaPulse 800ms ease-out";
+  }
 
   return (
     <div style={{
@@ -1370,7 +1385,7 @@ function V2ProposalCard({ p, isPulsing, isDeploying, onApprove, onReject }) {
       padding: 14,
       marginBottom: 12,
       boxShadow: shadow,
-      ...pulseStyle,
+      animation,
     }}>
       {/* Header */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start", gap: 10, marginBottom: 10 }}>
@@ -1524,10 +1539,24 @@ function V2ProposalCard({ p, isPulsing, isDeploying, onApprove, onReject }) {
 function GlobalStyles() {
   return (
     <style>{`
+      /* Fired on proposal status transition (pending→approved→deployed). */
       @keyframes orcaPulse {
         0%   { box-shadow: 0 0 0 0    rgba(6, 182, 212, 0.55); }
         50%  { box-shadow: 0 0 0 10px rgba(6, 182, 212, 0.18); }
         100% { box-shadow: 0 0 0 0    rgba(6, 182, 212, 0);    }
+      }
+      /* Fired on first appearance of a scenario-generated proposal card.
+         Fade + slide up + amber stripe glow — the demo's money-shot beat. */
+      @keyframes orcaCardEnter {
+        0%   { opacity: 0; transform: translateY(20px); }
+        70%  { opacity: 1; transform: translateY(0);    }
+        100% { opacity: 1; transform: translateY(0);    }
+      }
+      @keyframes orcaStripePulse {
+        0%   { box-shadow: -4px 0 14px 0 rgba(234, 179, 8, 0.55),
+                             0 4px 16px    rgba(234, 179, 8, 0.22); }
+        100% { box-shadow: -4px 0 0 0   rgba(234, 179, 8, 0),
+                             0 4px 16px    rgba(234, 179, 8, 0.12); }
       }
     `}</style>
   );
@@ -1543,6 +1572,11 @@ function OperationsTab({ state, events, agentRunning, wsStatus, onToggleAgent, o
   const [pulseId, setPulseId] = useState(null);
   const prevStatusRef = useRef({});
   const [deployingIds, setDeployingIds] = useState(new Set());
+  // Track which proposal id just appeared — triggers the entrance
+  // animation (fade-in + slide-up + stripe pulse), distinct from the
+  // status-transition pulse above.
+  const [entranceId, setEntranceId] = useState(null);
+  const prevIdsRef = useRef(new Set());
 
   useEffect(() => {
     const poll = async () => {
@@ -1595,6 +1629,28 @@ function OperationsTab({ state, events, agentRunning, wsStatus, onToggleAgent, o
     if (transitioned.length) {
       setPulseId(transitioned[0]);
       const t = setTimeout(() => setPulseId(null), 900);
+      return () => clearTimeout(t);
+    }
+  }, [v2Proposals]);
+
+  // Entrance animation: fire once per newly-arrived proposal id. Compare
+  // current ids against the previous set. Skip the very first render
+  // (where every id is "new") so refreshes don't re-fire the animation
+  // on already-seen proposals.
+  const entranceInitializedRef = useRef(false);
+  useEffect(() => {
+    const curr = new Set(v2Proposals.map(p => p.id));
+    if (!entranceInitializedRef.current) {
+      prevIdsRef.current = curr;
+      entranceInitializedRef.current = true;
+      return;
+    }
+    const fresh = [...curr].filter(id => !prevIdsRef.current.has(id));
+    prevIdsRef.current = curr;
+    if (fresh.length) {
+      // Animate the newest-first proposal (store renders in newest-first)
+      setEntranceId(fresh[fresh.length - 1]);
+      const t = setTimeout(() => setEntranceId(null), 1300);
       return () => clearTimeout(t);
     }
   }, [v2Proposals]);
@@ -1723,6 +1779,7 @@ function OperationsTab({ state, events, agentRunning, wsStatus, onToggleAgent, o
           key={p.id}
           p={p}
           isPulsing={pulseId === p.id}
+          isNew={entranceId === p.id}
           isDeploying={deployingIds.has(p.id) || p.status === "deploying"}
           onApprove={() => v2Approve(p.id)}
           onReject={() => v2Reject(p.id)}

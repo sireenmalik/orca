@@ -107,6 +107,10 @@ def create_proposal(payload: dict) -> dict:
         "commit_sha":             None,
         "branch":                 None,
         "triggering_incident_id": payload.get("triggering_incident_id"),
+        # Optional: scenario id that generated this proposal. Used by
+        # _deploy() to stream act-specific recovery log entries after
+        # the deploy simulation completes.
+        "triggering_scenario_id": payload.get("triggering_scenario_id"),
         # Demo convenience: let the caller pin gates to pass/fail from the
         # UI without re-validating. Real v2 would run checks server-side.
         "all_gates_passed":       all(g.get("status") == "pass"
@@ -319,6 +323,27 @@ async def _deploy(p: dict, broadcast) -> None:
                 ),
             },
         })
+
+        # ── Act-specific post-deploy recovery stream ──
+        # Only when the proposal came from a scripted scenario. Uses the
+        # "recovered" subtype for green styling, distinct from reasoning.
+        scenario_id = p.get("triggering_scenario_id")
+        if scenario_id:
+            from agent.scenarios import SCENARIO_RECOVERY_ENTRIES
+            for entry in SCENARIO_RECOVERY_ENTRIES.get(scenario_id, []):
+                await asyncio.sleep(entry.get("delay_ms", 300) / 1000.0)
+                await broadcast({
+                    "type":      "scenario_log",
+                    "timestamp": datetime.utcnow().isoformat(),
+                    "data": {
+                        "seq":           -2,
+                        "subtype":       "recovered",
+                        "content":       entry.get("content", ""),
+                        "is_conclusion": False,
+                        "scenario_id":   scenario_id,
+                        "proposal_id":   p["id"],
+                    },
+                })
     finally:
         _deploying.discard(p["id"])
 
