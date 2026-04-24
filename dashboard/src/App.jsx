@@ -1385,7 +1385,539 @@ const V2_EMAIL_STRIPE = {
   external_tac: C.yellow,    // amber stripe for TAC handoffs
 };
 
-function V2EmailRow({ email, onSend, onDiscard }) {
+// ─── V2 PROPOSAL MODAL ───────────────────────────────────────────────────────
+// Three-column full-fidelity review modal. Clicking anywhere on a V2
+// proposal card opens this. Left = REASON / PROJECTED / VALIDATION /
+// DEVICES / AUDIT. Middle = DIFF with device tabs. Right = editable
+// proposed config for the selected device tab. Bottom = comment box +
+// Reject / Save (local) / Save & Commit (persists) / Approve & Push.
+// Read-only mode when proposal is already approved/deploying/deployed/
+// rejected — action bar collapses to just Close.
+function V2ProposalModal({ proposal, onClose, onApprove, onReject, onSaveCommit }) {
+  const devices = (proposal.devices && proposal.devices.length > 0)
+    ? proposal.devices
+    : [{ id: "default", label: proposal.title || "proposal", note: null }];
+
+  const [activeIdx,    setActiveIdx]    = useState(0);
+  const [comment,      setComment]      = useState(proposal.comment || "");
+  const [draftSaved,   setDraftSaved]   = useState(false);
+  const [committed,    setCommitted]    = useState(false);
+  const [configDrafts, setConfigDrafts] = useState(() => {
+    const init = {};
+    devices.forEach(d => {
+      init[d.id] = (proposal.device_configs || {})[d.id] || "";
+    });
+    return init;
+  });
+  const [editedDeviceIds, setEditedDeviceIds] = useState(new Set());
+
+  const isReadOnly = ["approved", "deploying", "deployed", "rejected"].includes(proposal.status);
+  const status = STATUS_STYLE[proposal.status] || STATUS_STYLE.pending;
+  const activeDevice = devices[activeIdx] || devices[0];
+  const activeDiff = (proposal.device_diffs && proposal.device_diffs[activeDevice.id])
+    || proposal.diff
+    || [];
+
+  // Escape closes the modal
+  useEffect(() => {
+    const h = (e) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", h);
+    return () => window.removeEventListener("keydown", h);
+  }, [onClose]);
+
+  const onConfigEdit = (deviceId, next) => {
+    setConfigDrafts(prev => ({ ...prev, [deviceId]: next }));
+    setEditedDeviceIds(prev => new Set([...prev, deviceId]));
+    setDraftSaved(false);
+    setCommitted(false);
+  };
+
+  const handleSave = () => {
+    // local-only — no server call. Persists within the modal until closed.
+    setDraftSaved(true);
+    setCommitted(false);
+  };
+
+  const handleSaveCommit = async () => {
+    try {
+      await fetch(`${API}/api/proposals/${proposal.id}/save`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ comment, device_configs: configDrafts }),
+      });
+    } catch {}
+    setCommitted(true);
+    setDraftSaved(true);
+    if (onSaveCommit) onSaveCommit();
+  };
+
+  const ts = (() => {
+    try { return new Date(proposal.created_at).toLocaleString(); } catch { return ""; }
+  })();
+
+  const backdrop = {
+    position: "fixed", inset: 0, background: "rgba(0,0,0,0.62)",
+    zIndex: 2000, display: "flex", alignItems: "center", justifyContent: "center",
+    padding: 20,
+  };
+  const panel = {
+    background: C.panel, border: `1px solid ${C.border}`, borderRadius: 10,
+    width: "90vw", height: "85vh", maxWidth: 1400, maxHeight: 900,
+    display: "flex", flexDirection: "column", overflow: "hidden",
+    boxShadow: "0 32px 80px rgba(0,0,0,0.7)",
+  };
+
+  return (
+    <div onClick={onClose} style={backdrop}>
+      <div onClick={e => e.stopPropagation()} style={panel}>
+
+        {/* HEADER STRIP */}
+        <div style={{ display: "flex", alignItems: "center", gap: 14, padding: "14px 18px", borderBottom: `1px solid ${C.border}`, flexShrink: 0, flexWrap: "wrap" }}>
+          <span style={{
+            fontSize: FS.logBadge, fontWeight: 700, padding: "4px 12px", borderRadius: 4,
+            background: status.fg + "20", color: status.fg, fontFamily: "monospace", letterSpacing: 0.5, flexShrink: 0,
+          }}>{status.label}</span>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: "clamp(16px, 1.4vw, 20px)", fontWeight: 700, color: C.text, lineHeight: 1.25, wordBreak: "break-word" }}>
+              {proposal.title}
+            </div>
+            {proposal.summary && (
+              <div style={{ fontSize: FS.proposalReason, color: C.muted, marginTop: 3 }}>
+                {proposal.summary}
+              </div>
+            )}
+          </div>
+          <div style={{ fontSize: FS.logTimestamp, color: C.muted, fontFamily: "monospace", textAlign: "right", flexShrink: 0 }}>
+            <div>{ts}</div>
+            <div>{proposal.id}</div>
+          </div>
+          <button onClick={onClose} aria-label="Close" style={{
+            background: "transparent", border: "none", color: C.muted, fontSize: 22, cursor: "pointer",
+            padding: "0 4px", lineHeight: 1, flexShrink: 0,
+          }}>×</button>
+        </div>
+
+        {/* DEVICE TAB BAR (only when >1 device) */}
+        {devices.length > 1 && (
+          <div style={{ display: "flex", gap: 2, padding: "8px 18px", background: "rgba(255,255,255,0.02)", borderBottom: `1px solid ${C.border}`, flexShrink: 0 }}>
+            {devices.map((d, i) => {
+              const active = i === activeIdx;
+              const edited = editedDeviceIds.has(d.id);
+              return (
+                <button key={d.id} onClick={() => setActiveIdx(i)} style={{
+                  padding: "6px 14px", borderRadius: 5, border: "none",
+                  fontSize: FS.validationLabel, fontWeight: 700, fontFamily: "monospace",
+                  background: active ? "rgba(6,182,212,0.14)" : "transparent",
+                  color: active ? C.blue : C.muted, cursor: "pointer",
+                }}>
+                  📋 {d.label || d.id}
+                  {edited && <span title="unsaved edits" style={{ marginLeft: 6, color: C.yellow }}>●</span>}
+                </button>
+              );
+            })}
+          </div>
+        )}
+
+        {/* THREE-COLUMN BODY */}
+        <div style={{ flex: 1, display: "grid", gridTemplateColumns: "minmax(0, 25fr) minmax(0, 37fr) minmax(0, 38fr)", minHeight: 0, overflow: "hidden" }}>
+
+          {/* LEFT — Review panel */}
+          <div style={{ padding: "14px 16px", overflow: "auto", borderRight: `1px solid ${C.border}` }}>
+            <div style={{ fontSize: "clamp(10px, 0.9vw, 12px)", fontWeight: 700, color: C.muted, letterSpacing: 1.5, marginBottom: 6 }}>REASON</div>
+            <div style={{ fontSize: "clamp(12px, 1.05vw, 14px)", color: C.text, lineHeight: 1.55, marginBottom: 18, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
+              {proposal.reason || "—"}
+            </div>
+
+            <div style={{ fontSize: "clamp(10px, 0.9vw, 12px)", fontWeight: 700, color: C.muted, letterSpacing: 1.5, marginBottom: 6 }}>PROJECTED</div>
+            <div style={{ fontSize: "clamp(12px, 1.05vw, 14px)", color: C.green, fontFamily: "monospace", lineHeight: 1.5, marginBottom: 18, wordBreak: "break-word" }}>
+              {proposal.projected_impact || "—"}
+            </div>
+
+            <div style={{ fontSize: "clamp(10px, 0.9vw, 12px)", fontWeight: 700, color: C.muted, letterSpacing: 1.5, marginBottom: 8 }}>VALIDATION</div>
+            <div style={{ marginBottom: 18 }}>
+              {(proposal.validation_gates || []).map(g => {
+                const col = GATE_COLOR[g.status] || GATE_COLOR.pending;
+                return (
+                  <div key={g.name} style={{ marginBottom: 10 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <span style={{ fontSize: "clamp(12px, 1.0vw, 14px)", fontWeight: 700, color: C.text, fontFamily: "monospace" }}>{g.name}</span>
+                      <span style={{ fontSize: FS.logBadge, fontWeight: 700, padding: "1px 6px", borderRadius: 3, background: col.bg, color: col.fg, fontFamily: "monospace" }}>
+                        {col.icon} {g.status.toUpperCase()}
+                      </span>
+                    </div>
+                    <div style={{ fontSize: "clamp(11px, 0.95vw, 13px)", color: C.muted, marginTop: 2, paddingLeft: 2, lineHeight: 1.4, wordBreak: "break-word" }}>
+                      {g.detail || ""}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            <div style={{ fontSize: "clamp(10px, 0.9vw, 12px)", fontWeight: 700, color: C.muted, letterSpacing: 1.5, marginBottom: 6 }}>DEVICES</div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 18 }}>
+              {devices.map((d, i) => (
+                <button key={d.id} onClick={() => setActiveIdx(i)} style={{
+                  padding: "4px 10px", borderRadius: 4, border: `1px solid ${i === activeIdx ? C.blue : C.border}`,
+                  background: i === activeIdx ? "rgba(6,182,212,0.14)" : "transparent",
+                  color: i === activeIdx ? C.blue : C.muted,
+                  fontSize: FS.validationLabel, fontWeight: 700, fontFamily: "monospace", cursor: "pointer",
+                  display: "flex", alignItems: "center", gap: 4,
+                }}>
+                  {d.id}
+                  {d.note && <span style={{ fontSize: FS.logBadge, color: C.muted, fontWeight: 400 }}>· {d.note}</span>}
+                </button>
+              ))}
+            </div>
+
+            <div style={{ fontSize: "clamp(10px, 0.9vw, 12px)", fontWeight: 700, color: C.muted, letterSpacing: 1.5, marginBottom: 6 }}>AUDIT</div>
+            <div style={{ fontSize: "clamp(11px, 0.95vw, 13px)", color: C.muted, fontFamily: "monospace", lineHeight: 1.7 }}>
+              <div>Created: {ts || "—"}</div>
+              <div>Incident: {proposal.triggering_incident_id || proposal.triggering_scenario_id || "—"}</div>
+              <div>Approver: {proposal.approved_at ? "operator@session" : "[Pending]"}</div>
+              <div>Status: {proposal.status}</div>
+              {proposal.pr_url && (
+                <div style={{ marginTop: 6 }}>
+                  <a href={proposal.pr_url} target="_blank" rel="noreferrer" style={{ color: C.blue, textDecoration: "none" }}>
+                    🔀 PR #{proposal.pr_number}
+                  </a>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* MIDDLE — Diff */}
+          <div style={{ display: "flex", flexDirection: "column", borderRight: `1px solid ${C.border}`, minHeight: 0 }}>
+            <div style={{ padding: "12px 16px 8px", flexShrink: 0 }}>
+              <div style={{ fontSize: "clamp(10px, 0.9vw, 12px)", fontWeight: 700, color: C.muted, letterSpacing: 1.5 }}>
+                DIFF — CURRENT vs PROPOSED
+              </div>
+              <div style={{ fontSize: FS.logTimestamp, color: C.muted, marginTop: 2, fontFamily: "monospace" }}>
+                {activeDevice.label || activeDevice.id}
+              </div>
+            </div>
+            <div style={{
+              flex: 1, overflow: "auto", padding: "4px 12px 12px",
+              fontFamily: "monospace", fontSize: "clamp(12px, 1.0vw, 14px)",
+              lineHeight: 1.7, minHeight: 0,
+            }}>
+              {activeDiff.length === 0 ? (
+                <div style={{ color: C.muted, padding: 12, textAlign: "center" }}>No diff entries</div>
+              ) : activeDiff.map((d, i) => (
+                <div key={i} style={{
+                  padding: "1px 8px", whiteSpace: "pre",
+                  background: d.type === "add" ? "rgba(16,185,129,0.10)"
+                            : d.type === "remove" ? "rgba(239,68,68,0.10)"
+                            : "transparent",
+                  color: d.type === "add" ? C.green
+                       : d.type === "remove" ? C.red
+                       : "#94a3b8",
+                }}>
+                  {d.type === "add" ? "+ " : d.type === "remove" ? "- " : "  "}{d.line}
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* RIGHT — Editable proposed config */}
+          <div style={{ display: "flex", flexDirection: "column", minHeight: 0 }}>
+            <div style={{ padding: "12px 16px 8px", flexShrink: 0 }}>
+              <div style={{ fontSize: "clamp(10px, 0.9vw, 12px)", fontWeight: 700, color: isReadOnly ? C.muted : C.blue, letterSpacing: 1.5 }}>
+                {isReadOnly ? "DEPLOYED CONFIG — READ ONLY" : "PROPOSED CONFIG — EDITABLE"}
+              </div>
+              <div style={{ fontSize: FS.logTimestamp, color: C.muted, marginTop: 2, fontFamily: "monospace" }}>
+                {activeDevice.label || activeDevice.id}
+              </div>
+            </div>
+            <textarea
+              value={configDrafts[activeDevice.id] || ""}
+              onChange={(e) => onConfigEdit(activeDevice.id, e.target.value)}
+              readOnly={isReadOnly}
+              spellCheck={false}
+              style={{
+                flex: 1, margin: "4px 12px 12px", padding: 10,
+                background: "#0d1117", color: C.text,
+                fontFamily: "monospace", fontSize: "clamp(12px, 1.0vw, 14px)",
+                lineHeight: 1.6, whiteSpace: "pre",
+                border: `1px solid ${C.border}`, borderRadius: 4,
+                outline: "none", resize: "none", minHeight: 0,
+              }}
+              onFocus={e => !isReadOnly && (e.currentTarget.style.borderColor = C.blue)}
+              onBlur={e => e.currentTarget.style.borderColor = C.border}
+            />
+          </div>
+        </div>
+
+        {/* ACTION BAR */}
+        <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 18px", borderTop: `1px solid ${C.border}`, flexShrink: 0, flexWrap: "wrap", background: "rgba(255,255,255,0.02)" }}>
+          {isReadOnly ? (
+            <button onClick={onClose} style={{
+              marginLeft: "auto",
+              padding: "8px 22px", borderRadius: 6,
+              fontSize: FS.proposalReason, fontWeight: 700, cursor: "pointer",
+              background: "rgba(255,255,255,0.04)", color: C.text,
+              border: `1px solid ${C.border}`,
+            }}>Close</button>
+          ) : (
+            <>
+              <input
+                type="text"
+                value={comment}
+                onChange={e => { setComment(e.target.value); setDraftSaved(false); }}
+                placeholder="Add a comment (optional)..."
+                style={{
+                  flex: 1, minWidth: 200,
+                  padding: "8px 10px", borderRadius: 5,
+                  background: "rgba(255,255,255,0.03)", color: C.text,
+                  fontSize: FS.body, fontFamily: "inherit",
+                  border: `1px solid ${C.border}`, outline: "none",
+                }}
+              />
+              {draftSaved && (
+                <span style={{
+                  fontSize: FS.logBadge, fontWeight: 700, padding: "3px 8px", borderRadius: 3,
+                  background: C.yellow + "22", color: C.yellow, fontFamily: "monospace",
+                }}>{committed ? "COMMITTED" : "DRAFT SAVED"}</span>
+              )}
+              <button onClick={() => onReject(comment)} style={{
+                padding: "8px 14px", borderRadius: 6,
+                fontSize: FS.proposalReason, fontWeight: 600, cursor: "pointer",
+                background: "transparent", color: C.red,
+                border: `1px solid ${C.red}66`,
+              }}>✗ Reject</button>
+              <button onClick={handleSave} style={{
+                padding: "8px 14px", borderRadius: 6,
+                fontSize: FS.proposalReason, fontWeight: 600, cursor: "pointer",
+                background: "rgba(255,255,255,0.04)", color: C.muted,
+                border: `1px solid ${C.border}`,
+              }}>💾 Save</button>
+              <button onClick={handleSaveCommit} style={{
+                padding: "8px 14px", borderRadius: 6,
+                fontSize: FS.proposalReason, fontWeight: 700, cursor: "pointer",
+                background: C.blue + "22", color: C.blue,
+                border: `1px solid ${C.blue}66`,
+              }}>🔀 Save & Commit</button>
+              <button onClick={() => onApprove(comment)} style={{
+                padding: "8px 18px", borderRadius: 6,
+                fontSize: FS.proposalReason, fontWeight: 700, cursor: "pointer",
+                background: C.green + "22", color: C.green,
+                border: `1px solid ${C.green}`,
+              }}>✓ Approve & Push</button>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── V2 EMAIL MODAL ──────────────────────────────────────────────────────────
+// Single-column full-view modal for a queued email. Body is read-only by
+// default; Edit toggles it into a textarea. Attachment clicks show a
+// demo-honest toast ("preview not wired"). Send/Discard/Save Draft/Edit
+// buttons only when status=draft; read-only shows just Close.
+function V2EmailModal({ email, onClose, onSend, onDiscard, onEdit, onSaveDraft }) {
+  const [editing, setEditing] = useState(false);
+  const [bodyDraft, setBodyDraft] = useState(email.body || "");
+  const [toast, setToast] = useState(null);
+  const s = V2_EMAIL_STATUS[email.status] || V2_EMAIL_STATUS.draft;
+  const isDraft = email.status === "draft";
+
+  useEffect(() => {
+    const h = (e) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", h);
+    return () => window.removeEventListener("keydown", h);
+  }, [onClose]);
+
+  useEffect(() => { setBodyDraft(email.body || ""); }, [email.body]);
+
+  const ts = (() => {
+    try { return new Date(email.created_at).toLocaleString(); } catch { return ""; }
+  })();
+
+  const showAttachmentToast = () => {
+    setToast("Attachment preview not wired — demo harness");
+    setTimeout(() => setToast(null), 2200);
+  };
+
+  const fmtSize = (b) => {
+    const n = Number(b) || 0;
+    if (n >= 1024 * 1024) return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+    if (n >= 1024)        return `${(n / 1024).toFixed(1)} KB`;
+    return `${n} B`;
+  };
+
+  const backdrop = {
+    position: "fixed", inset: 0, background: "rgba(0,0,0,0.62)",
+    zIndex: 2000, display: "flex", alignItems: "center", justifyContent: "center",
+    padding: 20,
+  };
+  const panel = {
+    background: C.panel, border: `1px solid ${C.border}`, borderRadius: 10,
+    width: "70vw", height: "85vh", maxWidth: 900, maxHeight: 900,
+    display: "flex", flexDirection: "column", overflow: "hidden",
+    boxShadow: "0 32px 80px rgba(0,0,0,0.7)",
+  };
+
+  return (
+    <div onClick={onClose} style={backdrop}>
+      <div onClick={e => e.stopPropagation()} style={panel}>
+
+        {/* HEADER */}
+        <div style={{ display: "flex", alignItems: "center", gap: 14, padding: "12px 18px", borderBottom: `1px solid ${C.border}`, flexShrink: 0, flexWrap: "wrap" }}>
+          <span style={{
+            fontSize: FS.logBadge, fontWeight: 700, padding: "4px 12px", borderRadius: 4,
+            background: s.bg, color: s.fg, fontFamily: "monospace", letterSpacing: 0.5,
+          }}>{s.label}</span>
+          <span style={{ fontSize: FS.body, color: C.muted, fontFamily: "monospace" }}>from {email.from}</span>
+          <span style={{ fontSize: FS.logTimestamp, color: C.muted, fontFamily: "monospace", marginLeft: "auto" }}>{ts}</span>
+          <button onClick={onClose} aria-label="Close" style={{
+            background: "transparent", border: "none", color: C.muted, fontSize: 22, cursor: "pointer",
+            padding: "0 4px", lineHeight: 1,
+          }}>×</button>
+        </div>
+
+        {/* RECIPIENTS + SUBJECT */}
+        <div style={{ padding: "14px 18px", borderBottom: `1px solid ${C.border}`, flexShrink: 0 }}>
+          <div style={{ fontSize: FS.body, color: C.muted, marginBottom: 4, display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
+            <span style={{ letterSpacing: 1, textTransform: "uppercase", fontSize: FS.logBadge }}>To</span>
+            {(email.to || []).map((r, i) => (
+              <span key={i} style={{ padding: "2px 8px", borderRadius: 3, background: "rgba(255,255,255,0.04)", color: C.text, fontFamily: "monospace", fontSize: FS.body }}>{r}</span>
+            ))}
+          </div>
+          {(email.cc || []).length > 0 && (
+            <div style={{ fontSize: FS.body, color: C.muted, marginBottom: 4, display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
+              <span style={{ letterSpacing: 1, textTransform: "uppercase", fontSize: FS.logBadge }}>Cc</span>
+              {email.cc.map((r, i) => (
+                <span key={i} style={{ padding: "2px 8px", borderRadius: 3, background: "rgba(255,255,255,0.04)", color: C.muted, fontFamily: "monospace", fontSize: FS.body }}>{r}</span>
+              ))}
+            </div>
+          )}
+          <div style={{ fontSize: "clamp(15px, 1.3vw, 18px)", fontWeight: 700, color: C.text, marginTop: 8, wordBreak: "break-word" }}>
+            {email.subject}
+          </div>
+        </div>
+
+        {/* BODY */}
+        <div style={{ flex: 1, minHeight: 0, overflow: "auto", padding: "14px 18px" }}>
+          {editing ? (
+            <textarea
+              value={bodyDraft}
+              onChange={e => setBodyDraft(e.target.value)}
+              spellCheck={false}
+              style={{
+                width: "100%", minHeight: "100%", boxSizing: "border-box",
+                background: "#0d1117", color: C.text,
+                padding: 10, border: `1px solid ${C.blue}`, borderRadius: 4,
+                fontSize: "clamp(12px, 1.05vw, 14px)", fontFamily: "monospace",
+                lineHeight: 1.65, outline: "none", resize: "none",
+              }}
+            />
+          ) : (
+            <div style={{
+              fontSize: "clamp(12px, 1.05vw, 14px)", color: C.text,
+              lineHeight: 1.65, whiteSpace: "pre-wrap", wordBreak: "break-word",
+              fontFamily: "'DM Sans', 'Segoe UI', system-ui, sans-serif",
+            }}>
+              {email.body || ""}
+            </div>
+          )}
+        </div>
+
+        {/* ATTACHMENTS */}
+        {(email.attachments || []).length > 0 && (
+          <div style={{ borderTop: `1px solid ${C.border}`, padding: "10px 18px 14px", flexShrink: 0, maxHeight: "30%", overflow: "auto" }}>
+            <div style={{ fontSize: "clamp(10px, 0.9vw, 12px)", fontWeight: 700, color: C.muted, letterSpacing: 1.5, marginBottom: 8 }}>
+              ATTACHMENTS — {email.attachments.length} file{email.attachments.length === 1 ? "" : "s"}
+            </div>
+            {email.attachments.map((a, i) => (
+              <div key={i}
+                onClick={showAttachmentToast}
+                style={{
+                  display: "flex", alignItems: "center", gap: 10, padding: "6px 8px",
+                  borderRadius: 4, cursor: "pointer",
+                  transition: "background 0.15s",
+                }}
+                onMouseEnter={e => e.currentTarget.style.background = "rgba(255,255,255,0.04)"}
+                onMouseLeave={e => e.currentTarget.style.background = "transparent"}
+              >
+                <span style={{ fontSize: 16, flexShrink: 0 }}>📄</span>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: "clamp(12px, 1.05vw, 14px)", fontWeight: 700, color: C.text, fontFamily: "monospace", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {a.filename}
+                  </div>
+                  <div style={{ fontSize: "clamp(10px, 0.85vw, 12px)", color: C.muted, fontFamily: "monospace" }}>
+                    {a.mime_type}
+                  </div>
+                </div>
+                <div style={{ fontSize: FS.body, color: C.muted, fontFamily: "monospace", flexShrink: 0 }}>
+                  {fmtSize(a.size_bytes)}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* ACTION BAR */}
+        <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 18px", borderTop: `1px solid ${C.border}`, flexShrink: 0, background: "rgba(255,255,255,0.02)" }}>
+          {isDraft ? (
+            <>
+              <div style={{ flex: 1 }} />
+              <button onClick={() => onDiscard(email.id)} style={{
+                padding: "8px 14px", borderRadius: 6,
+                fontSize: FS.proposalReason, fontWeight: 600, cursor: "pointer",
+                background: "transparent", color: C.red, border: `1px solid ${C.red}66`,
+              }}>Discard</button>
+              <button onClick={() => {
+                if (editing) {
+                  // Edit Done — persist local draft back to parent if provided
+                  if (onEdit) onEdit(email.id, bodyDraft);
+                }
+                setEditing(!editing);
+              }} style={{
+                padding: "8px 14px", borderRadius: 6,
+                fontSize: FS.proposalReason, fontWeight: 600, cursor: "pointer",
+                background: "rgba(255,255,255,0.04)", color: C.text,
+                border: `1px solid ${C.border}`,
+              }}>{editing ? "Edit Done" : "Edit"}</button>
+              {editing && (
+                <button onClick={() => { onSaveDraft && onSaveDraft(email.id, bodyDraft); }} style={{
+                  padding: "8px 14px", borderRadius: 6,
+                  fontSize: FS.proposalReason, fontWeight: 600, cursor: "pointer",
+                  background: C.blue + "22", color: C.blue, border: `1px solid ${C.blue}66`,
+                }}>Save Draft</button>
+              )}
+              <button onClick={() => onSend(email.id)} style={{
+                padding: "8px 22px", borderRadius: 6,
+                fontSize: FS.proposalReason, fontWeight: 700, cursor: "pointer",
+                background: C.green + "22", color: C.green, border: `1px solid ${C.green}`,
+              }}>Send</button>
+            </>
+          ) : (
+            <button onClick={onClose} style={{
+              marginLeft: "auto",
+              padding: "8px 22px", borderRadius: 6,
+              fontSize: FS.proposalReason, fontWeight: 700, cursor: "pointer",
+              background: "rgba(255,255,255,0.04)", color: C.text,
+              border: `1px solid ${C.border}`,
+            }}>Close</button>
+          )}
+        </div>
+
+        {/* TOAST */}
+        {toast && (
+          <div style={{
+            position: "absolute", bottom: 78, right: 20,
+            padding: "8px 14px", borderRadius: 5,
+            background: "rgba(17,24,39,0.96)", color: C.text,
+            border: `1px solid ${C.blue}66`, fontSize: FS.body,
+            boxShadow: "0 8px 24px rgba(0,0,0,0.4)",
+          }}>{toast}</div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function V2EmailRow({ email, onSend, onDiscard, onOpen }) {
   const s = V2_EMAIL_STATUS[email.status] || V2_EMAIL_STATUS.draft;
   const stripe = V2_EMAIL_STRIPE[email.type] || C.muted;
   const isDraft = email.status === "draft";
@@ -1402,7 +1934,7 @@ function V2EmailRow({ email, onSend, onDiscard }) {
 
   return (
     <div
-      onClick={() => {/* Prompt 7 will wire expansion here */}}
+      onClick={() => onOpen && onOpen(email.id)}
       style={{
         background: "rgba(255,255,255,0.02)",
         border: `1px solid ${C.border}`,
@@ -1485,7 +2017,7 @@ function V2EmailRow({ email, onSend, onDiscard }) {
   );
 }
 
-function V2ProposalCard({ p, isPulsing, isNew, isDeploying, onApprove, onReject }) {
+function V2ProposalCard({ p, isPulsing, isNew, isDeploying, onApprove, onReject, onOpen }) {
   const status = STATUS_STYLE[p.status] || STATUS_STYLE.pending;
   const gates  = p.validation_gates || [];
   const allPass = gates.length > 0 && gates.every(g => g.status === "pass");
@@ -1512,7 +2044,9 @@ function V2ProposalCard({ p, isPulsing, isNew, isDeploying, onApprove, onReject 
   }
 
   return (
-    <div style={{
+    <div
+      onClick={() => onOpen && onOpen(p.id)}
+      style={{
       background: "rgba(255,255,255,0.02)",
       border: `1px solid ${C.border}`,
       borderLeft: `3px solid ${status.border}`,
@@ -1521,6 +2055,7 @@ function V2ProposalCard({ p, isPulsing, isNew, isDeploying, onApprove, onReject 
       marginBottom: 12,
       boxShadow: shadow,
       animation,
+      cursor: "pointer",
     }}>
       {/* Header */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start", gap: 10, marginBottom: 10 }}>
@@ -1630,9 +2165,9 @@ function V2ProposalCard({ p, isPulsing, isNew, isDeploying, onApprove, onReject 
 
       {/* Action buttons */}
       {p.status === "pending" && (
-        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+        <div onClick={e => e.stopPropagation()} style={{ display: "flex", gap: 8, alignItems: "center" }}>
           <button
-            onClick={onApprove}
+            onClick={e => { e.stopPropagation(); onApprove && onApprove(); }}
             disabled={!canApprove}
             title={approveTooltip}
             style={{
@@ -1651,7 +2186,7 @@ function V2ProposalCard({ p, isPulsing, isNew, isDeploying, onApprove, onReject 
             {isDeploying ? "⚙️ Deploying..." : "✓ Approve & Deploy"}
           </button>
           <button
-            onClick={onReject}
+            onClick={e => { e.stopPropagation(); onReject && onReject(); }}
             disabled={isDeploying}
             style={{
               padding: "10px 14px",
@@ -1915,7 +2450,13 @@ function OperationsTab({ state, events, agentRunning, wsStatus, onToggleAgent, o
       {v2Emails.length === 0 ? (
         <div style={{ fontSize: FS.body, color: C.muted, textAlign: "center", paddingTop: 8 }}>No queued emails</div>
       ) : v2Emails.map(e => (
-        <V2EmailRow key={e.id} email={e} onSend={() => v2EmailSend(e.id)} onDiscard={() => v2EmailDiscard(e.id)} />
+        <V2EmailRow
+          key={e.id}
+          email={e}
+          onSend={() => v2EmailSend(e.id)}
+          onDiscard={() => v2EmailDiscard(e.id)}
+          onOpen={(id) => setEmailModal(id)}
+        />
       ))}
     </Panel>
   );
@@ -1960,6 +2501,7 @@ function OperationsTab({ state, events, agentRunning, wsStatus, onToggleAgent, o
           isDeploying={deployingIds.has(p.id) || p.status === "deploying"}
           onApprove={() => v2Approve(p.id)}
           onReject={() => v2Reject(p.id)}
+          onOpen={(id) => setConfigModal(id)}
         />
       ))}
     </Panel>
@@ -2036,8 +2578,39 @@ function OperationsTab({ state, events, agentRunning, wsStatus, onToggleAgent, o
 
       {/* Modals */}
       {logModalOpen && <AgentLogModal events={events} onClose={() => setLogModalOpen(false)} />}
-      {emailModal && <EmailModal email={emailModal} onClose={() => setEmailModal(null)} onSend={onEmailSend} />}
-      {configModal && <ConfigModal proposal={configModal} onClose={() => setConfigModal(null)} onAction={onConfigAction} events={events} />}
+
+      {/* v2 Proposal modal — look up current state from v2Proposals so the
+          modal reflects approve/deploy progress live. Auto-closes if the
+          proposal is cleared (e.g. by Reset). */}
+      {configModal && (() => {
+        const p = v2Proposals.find(x => x.id === configModal);
+        if (!p) return null;
+        return (
+          <V2ProposalModal
+            proposal={p}
+            onClose={() => setConfigModal(null)}
+            onApprove={() => { v2Approve(p.id); setConfigModal(null); }}
+            onReject={() => { v2Reject(p.id); setConfigModal(null); }}
+            onSaveCommit={() => { fetchV2(); }}
+          />
+        );
+      })()}
+
+      {/* v2 Email modal — same pattern: resolve id against v2Emails list. */}
+      {emailModal && (() => {
+        const e = v2Emails.find(x => x.id === emailModal);
+        if (!e) return null;
+        return (
+          <V2EmailModal
+            email={e}
+            onClose={() => setEmailModal(null)}
+            onSend={(id) => { v2EmailSend(id); setEmailModal(null); }}
+            onDiscard={(id) => { v2EmailDiscard(id); setEmailModal(null); }}
+            onEdit={(id, body) => { /* local edit — no backend roundtrip in v2 */ }}
+            onSaveDraft={(id, body) => { /* demo-only — edits persist in modal local state */ }}
+          />
+        );
+      })()}
     </div>
   );
 }

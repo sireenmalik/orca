@@ -93,6 +93,7 @@ def create_proposal(payload: dict) -> dict:
     p = {
         "id":                     pid,
         "title":                  payload.get("title", "Untitled proposal"),
+        "summary":                payload.get("summary", ""),
         "reason":                 payload.get("reason", ""),
         "projected_impact":       payload.get("projected_impact", ""),
         "diff":                   payload.get("diff", []),
@@ -111,6 +112,15 @@ def create_proposal(payload: dict) -> dict:
         # _deploy() to stream act-specific recovery log entries after
         # the deploy simulation completes.
         "triggering_scenario_id": payload.get("triggering_scenario_id"),
+        # v2 modal — per-device diff + per-device final config for the
+        # three-column review layout. If a scenario template doesn't
+        # supply these, the modal falls back to the flat `diff` field.
+        "devices":                list(payload.get("devices", []))        or None,
+        "device_diffs":           dict(payload.get("device_diffs", {}))   or None,
+        "device_configs":         dict(payload.get("device_configs", {})) or None,
+        # Modal action-bar state
+        "comment":                "",
+        "reviewed_at":            None,
         # Demo convenience: let the caller pin gates to pass/fail from the
         # UI without re-validating. Real v2 would run checks server-side.
         "all_gates_passed":       all(g.get("status") == "pass"
@@ -399,6 +409,26 @@ async def _deploy(p: dict, broadcast) -> None:
                     })
     finally:
         _deploying.discard(p["id"])
+
+
+def save_edits(proposal_id: str, payload: dict) -> dict:
+    """Save & Commit — write edited comment / device_configs / reason /
+    diff back to the proposal. Keeps status=pending; sets reviewed_at."""
+    p = _find(proposal_id)
+    if not p:
+        return {"error": "not found"}
+    if p["status"] != "pending":
+        return {"error": f"cannot save in status '{p['status']}'"}
+    if "comment" in payload:
+        p["comment"] = payload["comment"] or ""
+    if "reason" in payload:
+        p["reason"] = payload["reason"] or ""
+    if "device_configs" in payload and isinstance(payload["device_configs"], dict):
+        p["device_configs"] = {**(p.get("device_configs") or {}), **payload["device_configs"]}
+    if "diff" in payload and isinstance(payload["diff"], list):
+        p["diff"] = payload["diff"]
+    p["reviewed_at"] = _now_iso()
+    return dict(p)
 
 
 async def reject_proposal(

@@ -4,7 +4,7 @@ ORCA API Server — FastAPI backend with WebSocket streaming
 import asyncio, json, os
 from contextlib import asynccontextmanager
 from datetime import datetime
-from typing import Set
+from typing import Set, Optional
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -320,6 +320,27 @@ async def v2_approve_proposal(proposal_id: str, body: V2ProposalAction = V2Propo
 @app.post("/api/proposals/{proposal_id}/reject")
 async def v2_reject_proposal(proposal_id: str, body: V2ProposalAction = V2ProposalAction()):
     result = await v2_proposals.reject_proposal(proposal_id, manager.broadcast, body.comment)
+    return result
+
+class V2ProposalSave(BaseModel):
+    comment: Optional[str] = None
+    reason: Optional[str] = None
+    device_configs: Optional[dict] = None
+    diff: Optional[list] = None
+
+@app.post("/api/proposals/{proposal_id}/save")
+async def v2_save_proposal(proposal_id: str, body: V2ProposalSave):
+    result = v2_proposals.save_edits(proposal_id, body.dict(exclude_none=True))
+    if "error" in result:
+        return result
+    await manager.broadcast({
+        "type":      "agent_status",
+        "timestamp": datetime.utcnow().isoformat(),
+        "data": {
+            "status":  "proposal_saved",
+            "message": f"📝 Proposal {proposal_id} reviewed and committed by operator · diff updated",
+        },
+    })
     return result
 
 async def _broadcast_state():

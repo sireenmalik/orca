@@ -166,6 +166,7 @@ SCENARIOS = {
 SCENARIO_PROPOSAL_TEMPLATES = {
     "slice-a-qos-drift": {
         "title": "Slice-A QoS protection on UPF-01",
+        "summary": "Restore QER GBR to 50 Mbps + rebalance 180 sessions to UPF-02",
         "reason": (
             "Dual root cause on slice-A: (1) load-balancer session skew concentrates the "
             "enterprise cohort on UPF-01 with UPF-02 carrying zero slice-A sessions, "
@@ -175,46 +176,90 @@ SCENARIO_PROPOSAL_TEMPLATES = {
             "changes must ship atomically."
         ),
         "projected_impact": (
-            "p99 N3 latency returns to ~9ms · slice-A SLA breach risk eliminated for 842 "
-            "enterprise subscribers · $2.4M enterprise ARR cohort protected"
+            "slice-A p99 N3 latency returns to 8.9 ms · 842 enterprise subscribers protected · "
+            "$2.4M ARR cohort recovered"
         ),
+        "devices": [
+            {"id": "UPF-01", "note": None,                       "label": "UPF-01 · qer_change"},
+            {"id": "UPF-02", "note": None,                       "label": "UPF-02 · session_accept"},
+        ],
+        "device_diffs": {
+            "UPF-01": [
+                {"type": "context", "line": "upf: UPF-01"},
+                {"type": "context", "line": "qer_profiles:"},
+                {"type": "context", "line": "  slice-A-priority:"},
+                {"type": "remove",  "line": "    enforced_mbps: 32           # DRIFT -36% from intent"},
+                {"type": "add",     "line": "    enforced_mbps: 50           # restored to intent"},
+                {"type": "context", "line": "    intent_gbr_mbps: 50"},
+                {"type": "add",     "line": "    enforcement_mode: strict"},
+                {"type": "context", "line": "pfcp_sessions:"},
+                {"type": "context", "line": "  slice-A:"},
+                {"type": "remove",  "line": "    distribution: concentrated_on_upf_01"},
+                {"type": "add",     "line": "    distribution: balanced_upf_01_upf_02"},
+            ],
+            "UPF-02": [
+                {"type": "context", "line": "upf: UPF-02"},
+                {"type": "context", "line": "pfcp_sessions:"},
+                {"type": "context", "line": "  slice-A:"},
+                {"type": "add",     "line": "    incoming_migration_accept: true"},
+                {"type": "add",     "line": "    f_teid_pool: alt_pool_02"},
+                {"type": "add",     "line": "    batch_size_per_second: 30"},
+                {"type": "add",     "line": "    expected_incoming: 180"},
+            ],
+        },
+        "device_configs": {
+            "UPF-01": (
+                "upf: UPF-01\n"
+                "qer_profiles:\n"
+                "  slice-A-priority:\n"
+                "    enforced_mbps: 50           # restored to intent\n"
+                "    intent_gbr_mbps: 50\n"
+                "    enforcement_mode: strict\n"
+                "pfcp_sessions:\n"
+                "  slice-A:\n"
+                "    distribution: balanced_upf_01_upf_02\n"
+            ),
+            "UPF-02": (
+                "upf: UPF-02\n"
+                "pfcp_sessions:\n"
+                "  slice-A:\n"
+                "    incoming_migration_accept: true\n"
+                "    f_teid_pool: alt_pool_02\n"
+                "    batch_size_per_second: 30\n"
+                "    expected_incoming: 180\n"
+            ),
+        },
+        # Flat diff retained for the compact card preview (it uses .slice(0,8)).
         "diff": [
-            {"type": "context", "line": "upf-01:"},
-            {"type": "context", "line": "  qer_profiles:"},
-            {"type": "context", "line": "    slice-a-priority:"},
-            {"type": "context", "line": "      intent_gbr_mbps: 50"},
-            {"type": "remove",  "line": "      enforced_mbps: 32       # DRIFT -36% from intent"},
-            {"type": "add",     "line": "      enforced_mbps: 50       # restored to intent"},
-            {"type": "add",     "line": "      enforcement_mode: strict"},
-            {"type": "context", "line": "  pfcp_sessions:"},
-            {"type": "context", "line": "    slice-A:"},
-            {"type": "remove",  "line": "      high_bw_count: 637      # concentration on UPF-01"},
-            {"type": "add",     "line": "      high_bw_count: 457      # 180 sessions migrated to UPF-02"},
-            {"type": "context", "line": "upf-02:"},
-            {"type": "context", "line": "  pfcp_sessions:"},
-            {"type": "context", "line": "    slice-A:"},
-            {"type": "remove",  "line": "      high_bw_count: 0"},
-            {"type": "add",     "line": "      high_bw_count: 180      # balanced tail-distribution"},
+            {"type": "context", "line": "upf: UPF-01"},
+            {"type": "context", "line": "qer_profiles:"},
+            {"type": "context", "line": "  slice-A-priority:"},
+            {"type": "remove",  "line": "    enforced_mbps: 32           # DRIFT -36% from intent"},
+            {"type": "add",     "line": "    enforced_mbps: 50           # restored to intent"},
+            {"type": "add",     "line": "    enforcement_mode: strict"},
+            {"type": "remove",  "line": "    distribution: concentrated_on_upf_01"},
+            {"type": "add",     "line": "    distribution: balanced_upf_01_upf_02"},
         ],
         "validation_gates": [
             {"name": "Syntax",                "status": "pass",
-             "detail": "Candidate YAML schema-valid · SR Linux / CNF parser clean"},
+             "detail": "Valid YAML · PFCP IE structure per TS 29.244 · QER fields well-formed"},
             {"name": "Semantic",              "status": "pass",
-             "detail": "All referenced UPFs, slices, and PFCP session groups exist"},
+             "detail": "UPF-01 and UPF-02 reachable · slice-A QoS profile exists · target session IDs valid"},
             {"name": "Mission · utilization", "status": "pass",
-             "detail": "Post-change link utilization stays under 90% on all paths"},
+             "detail": "All N3 links remain < 90% after rebalance · no new transport congestion"},
             {"name": "Mission · slice SLA",   "status": "pass",
-             "detail": "Slice-A p99 projected 8.9ms, well within 15ms SLA threshold"},
+             "detail": "slice-A p99 projected 8.9 ms within 15 ms SLA · slice-B unaffected"},
             {"name": "Digital twin",          "status": "pass",
-             "detail": "60s traffic replay against candidate: no SLA breach, no session drop"},
+             "detail": "60s simulated traffic · SLA maintained throughout · no new anomalies"},
             {"name": "Policy",                "status": "pass",
-             "detail": "Change stays within approved QER enforcement policy envelope"},
+             "detail": "QER value in range (1-100 Mbps) · batch size within approved limits"},
         ],
         "triggering_incident_id": "slice-a-qos-drift",
     },
 
     "transport-congestion-upf-innocent": {
         "title": "Slice-A session migration off congested LSP-1",
+        "summary": "Re-anchor 180 slice-A sessions via alternate path bypassing PE-01 ↔ P-02",
         "reason": (
             "Transport layer congestion on PE-01 ↔ P-02 (93% utilization, microbursts) is "
             "upstream of UPF-01 and causing slice-A p99 N3 latency to climb toward SLA "
@@ -229,37 +274,50 @@ SCENARIO_PROPOSAL_TEMPLATES = {
             "to ~9ms · enterprise SLA preserved until operator resolves upstream transport "
             "congestion · Nokia core impact fully contained"
         ),
+        "devices": [
+            {"id": "UPF-01", "note": "session re-anchoring only",
+             "label": "UPF-01 · session_re_anchor"},
+        ],
+        "device_diffs": {
+            "UPF-01": [
+                {"type": "context", "line": "upf: UPF-01"},
+                {"type": "context", "line": "pfcp_sessions:"},
+                {"type": "context", "line": "  slice-A:"},
+                {"type": "remove",  "line": "    preferred_path: LSP-1"},
+                {"type": "add",     "line": "    preferred_path: alternate_bypass_PE-01_to_P-02"},
+                {"type": "add",     "line": "    rollback_plan: restore_LSP-1_on_transport_clear"},
+            ],
+        },
+        "device_configs": {
+            "UPF-01": (
+                "upf: UPF-01\n"
+                "pfcp_sessions:\n"
+                "  slice-A:\n"
+                "    preferred_path: alternate_bypass_PE-01_to_P-02\n"
+                "    rollback_plan: restore_LSP-1_on_transport_clear\n"
+            ),
+        },
         "diff": [
-            {"type": "context", "line": "upf-01:"},
-            {"type": "context", "line": "  pfcp_sessions:"},
-            {"type": "context", "line": "    slice-A:"},
-            {"type": "context", "line": "      anchor_path: via-LSP-1"},
-            {"type": "remove",  "line": "      high_bw_count: 612      # on congested LSP-1 path"},
-            {"type": "add",     "line": "      high_bw_count: 432      # 180 sessions re-anchored"},
-            {"type": "context", "line": "  session_migration_override:"},
-            {"type": "add",     "line": "    slice-A:"},
-            {"type": "add",     "line": "      target_count: 180"},
-            {"type": "add",     "line": "      alternate_path: via-LSP-2"},
-            {"type": "add",     "line": "      rationale: 'LSP-1 PE-01↔P-02 at 93% — bypass'"},
-            {"type": "add",     "line": "      ttl_hours: 6           # auto-revert when transport resolved"},
-            {"type": "context", "line": "notifications:"},
-            {"type": "add",     "line": "  tac_email:"},
-            {"type": "add",     "line": "    vendor: operator_transport_team"},
-            {"type": "add",     "line": "    subject: 'Slice-A N3 impact · LSP-1 PE-01↔P-02 congestion'"},
+            {"type": "context", "line": "upf: UPF-01"},
+            {"type": "context", "line": "pfcp_sessions:"},
+            {"type": "context", "line": "  slice-A:"},
+            {"type": "remove",  "line": "    preferred_path: LSP-1"},
+            {"type": "add",     "line": "    preferred_path: alternate_bypass_PE-01_to_P-02"},
+            {"type": "add",     "line": "    rollback_plan: restore_LSP-1_on_transport_clear"},
         ],
         "validation_gates": [
             {"name": "Syntax",                "status": "pass",
-             "detail": "Candidate YAML schema-valid · PFCP override block syntax clean"},
+             "detail": "Valid YAML · PFCP modification IE structure per TS 29.244"},
             {"name": "Semantic",              "status": "pass",
-             "detail": "Alternate path via LSP-2 is up and has headroom"},
+             "detail": "UPF-01 reachable · alternate path configuration valid · session IDs valid"},
             {"name": "Mission · utilization", "status": "pass",
-             "detail": "Post-migration: LSP-2 peak util projected 61%, still under 90%"},
+             "detail": "Alternate path utilization stays < 80% · LSP-1 bypass effective"},
             {"name": "Mission · slice SLA",   "status": "pass",
-             "detail": "Slice-A p99 projected 9.1ms · slice-B path unaffected"},
+             "detail": "slice-A p99 projected recovery within 15 ms SLA"},
             {"name": "Digital twin",          "status": "pass",
-             "detail": "60s replay under current transport congestion: slice-A recovers, no collateral"},
+             "detail": "60s simulated with session re-anchoring · transport congestion bypassed successfully"},
             {"name": "Policy",                "status": "pass",
-             "detail": "Session-migration override is TTL-bounded · auto-reverts in 6h"},
+             "detail": "Session migration batch size and timing within human-approved limits"},
         ],
         "triggering_incident_id": "transport-congestion-upf-innocent",
     },
