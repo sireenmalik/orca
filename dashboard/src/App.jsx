@@ -1142,9 +1142,6 @@ function ControlsBar({ onAnalyze, onAction, playingScenario }) {
     if (!id) return;
     await fetch(`${API}/api/scenarios/${id}/inject`, { method: "POST" });
   };
-  const resetScenarios = async () => {
-    await fetch(`${API}/api/scenarios/reset`, { method: "POST" });
-  };
 
   const activeScenario = scenarios.find(s => s.id === playingScenario);
 
@@ -1162,9 +1159,10 @@ function ControlsBar({ onAnalyze, onAction, playingScenario }) {
         {scenarios.map(s => <option key={s.id} value={s.id}>{s.short_label}</option>)}
       </select>
       <button
-        onClick={resetScenarios}
-        style={{ padding: "4px 9px", borderRadius: 4, fontSize: 10, fontWeight: 600, cursor: "pointer", background: "rgba(255,255,255,0.04)", border: `1px solid ${C.border}`, color: C.muted, flexShrink: 0 }}
-      >Reset</button>
+        onClick={() => onAction("reset")}
+        title="Reset demo: clear proposals, emails, reasoning log (keeps Act 3 ALERT), restore topology + churn baseline"
+        style={{ padding: "4px 11px", borderRadius: 4, fontSize: 10, fontWeight: 700, cursor: "pointer", background: C.blue + "18", border: `1px solid ${C.blue}66`, color: C.blue, flexShrink: 0, letterSpacing: 0.3 }}
+      >↻ Reset Demo</button>
       {activeScenario && (
         <span style={{
           fontSize: 11, fontWeight: 700, padding: "3px 10px", borderRadius: 12,
