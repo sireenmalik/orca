@@ -1,0 +1,48 @@
+# ORCA v2 incident episode — v2-cfg-1777022428104
+# Scenario: slice-a-qos-drift
+
+proposal_id: "v2-cfg-1777022428104"
+triggering_scenario: "slice-a-qos-drift"
+detected_at: "2026-04-24T09:20:28.104098Z"
+approved_at: "2026-04-24T09:20:34.586183Z"
+deployed_at: "2026-04-24T09:20:38.933628Z"
+approver: "operator@session"
+config_pr_url: "https://github.com/sireenmalik/orca/pull/79"
+config_pr_number: 79
+
+diagnosis_summary: |
+  Pre-threshold detection engaged as slice-A p99 N3 latency on UPF-01 climbed from 11.2 ms toward the 15 ms SLA threshold. QER-table audit revealed enforcement on the slice-A priority class drifted to 32 Mbps vs 50 Mbps committed GBR (-36%), accumulated from successive config changes. Single root cause localized. Fix: one atomic QER restoration bringing enforcement back to committed intent with strict mode.
+
+validation_results:
+  - name: "Syntax"
+    status: "pass"
+    detail: "Valid YAML · QER IE structure per TS 29.244 · fields well-formed"
+  - name: "Semantic"
+    status: "pass"
+    detail: "UPF-01 reachable · slice-A QoS profile exists · QCI-to-QoS mapping valid"
+  - name: "Mission · utilization"
+    status: "pass"
+    detail: "No transport impact · all N3 links remain < 90%"
+  - name: "Mission · slice SLA"
+    status: "pass"
+    detail: "slice-A p99 projected to return to 8.9ms within 15ms SLA · slice-B unaffected"
+  - name: "Digital twin"
+    status: "pass"
+    detail: "60s simulated traffic with corrected QER · SLA maintained throughout · no new anomalies"
+  - name: "Policy"
+    status: "pass"
+    detail: "QER value 50 Mbps within operator-approved range (1-100 Mbps)"
+
+recovery_metrics:
+  - metric: "slice-A p99 N3 latency"
+    before: "13.1 ms"
+    after: "8.9 ms"
+  - metric: "enterprise at-risk cohort"
+    before: "423 subs"
+    after: "14 subs"
+  - metric: "revenue-at-risk"
+    before: "$1.20M"
+    after: "$40K"
+  - metric: "slice-A SLA headroom"
+    before: "0.1 ms"
+    after: "6.1 ms"
