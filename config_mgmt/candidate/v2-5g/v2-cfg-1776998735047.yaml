@@ -1,0 +1,45 @@
+# ORCA v2 config proposal — v2-cfg-1776998735047
+# Auto-generated on approve. Branch: v2/cfg/slice-a-session-migration-off-congested--20260424-024543
+
+title: "Slice-A session migration off congested LSP-1"
+reason: |
+  Transport layer congestion on PE-01 ↔ P-02 (93% utilization, microbursts) is upstream of UPF-01 and causing slice-A p99 N3 latency to climb toward SLA breach. ORCA has read-only access to transport — no direct fix available at the MPLS layer. Nokia-domain workaround: re-anchor slice-A sessions via an alternate PFCP path that bypasses the congested LSP-1. Parallel action: TAC email drafted to operator transport team with evidence + three suggested transport-side resolutions.
+projected_impact: |
+  Slice-A traffic bypasses PE-01 ↔ P-02 congestion · p99 N3 latency recovers to ~9ms · enterprise SLA preserved until operator resolves upstream transport congestion · Nokia core impact fully contained
+triggering_incident_id: "transport-congestion-upf-innocent"
+validation_gates:
+  - name: "Syntax"
+    status: "pass"
+    detail: "Candidate YAML schema-valid · PFCP override block syntax clean"
+  - name: "Semantic"
+    status: "pass"
+    detail: "Alternate path via LSP-2 is up and has headroom"
+  - name: "Mission · utilization"
+    status: "pass"
+    detail: "Post-migration: LSP-2 peak util projected 61%, still under 90%"
+  - name: "Mission · slice SLA"
+    status: "pass"
+    detail: "Slice-A p99 projected 9.1ms · slice-B path unaffected"
+  - name: "Digital twin"
+    status: "pass"
+    detail: "60s replay under current transport congestion: slice-A recovers, no collateral"
+  - name: "Policy"
+    status: "pass"
+    detail: "Session-migration override is TTL-bounded · auto-reverts in 6h"
+diff: |
+  upf-01:
+    pfcp_sessions:
+      slice-A:
+        anchor_path: via-LSP-1
+-       high_bw_count: 612      # on congested LSP-1 path
++       high_bw_count: 432      # 180 sessions re-anchored
+    session_migration_override:
++     slice-A:
++       target_count: 180
++       alternate_path: via-LSP-2
++       rationale: 'LSP-1 PE-01↔P-02 at 93% — bypass'
++       ttl_hours: 6           # auto-revert when transport resolved
+  notifications:
++   tac_email:
++     vendor: operator_transport_team
++     subject: 'Slice-A N3 impact · LSP-1 PE-01↔P-02 congestion'
