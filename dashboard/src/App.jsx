@@ -595,28 +595,6 @@ const scenarioSubtypeStyle = {
   alert:     { bg: "rgba(239,68,68,0.09)",  color: C.red,    label: "🔴 ALERT" },
 };
 
-// Pre-seeded Act 3 event — always present in the reasoning log, ~3h in
-// the past. Survives Reset. Detail block expands on click.
-const PRE_SEEDED_ALERT = {
-  type:      "scenario_log",
-  timestamp: new Date(Date.now() - 3 * 60 * 60 * 1000 - 17 * 60 * 1000).toISOString(),
-  data: {
-    seq:           -999,
-    subtype:       "alert",
-    content:       "Unauthorized gNMI config change attempt detected · target: PE-02 · source IP: 10.0.3.44 · invalid certificate · change blocked · connection terminated",
-    is_conclusion: false,
-    scenario_id:   "act3-security-teaser",
-    is_preseed:    true,
-    detail: {
-      source_ip:          "10.0.3.44",
-      target_device:      "PE-02",
-      attempted_change:   "gNMI SET on interface configuration",
-      certificate_status: "invalid (self-signed, not in trust store)",
-      action_taken:       "connection terminated, change blocked",
-      logged_to:          "SIEM (placeholder tag)",
-    },
-  },
-};
 
 const LogEntry = memo(function LogEntry({ entry }) {
   const data = entry.data || {};
@@ -1160,7 +1138,7 @@ function ControlsBar({ onAnalyze, onAction, playingScenario }) {
       </select>
       <button
         onClick={() => onAction("reset")}
-        title="Reset demo: clear proposals, emails, reasoning log (keeps Act 3 ALERT), restore topology + churn baseline"
+        title="Reset demo: clear proposals, emails, reasoning log, restore topology + churn baseline"
         style={{ padding: "4px 11px", borderRadius: 4, fontSize: 10, fontWeight: 700, cursor: "pointer", background: C.blue + "18", border: `1px solid ${C.blue}66`, color: C.blue, flexShrink: 0, letterSpacing: 0.3 }}
       >↻ Reset Demo</button>
       {activeScenario && (
@@ -3574,8 +3552,8 @@ const HIDDEN_TABS = {
 export default function App() {
   const [state, setState] = useState({ nodes: {}, links: {}, lsps: {}, alarms: [] });
   // Events start with a single pre-seeded Act 3 ALERT (~3h ago). Reset
-  // filters back to just the pre-seed; WebSocket events accumulate on top.
-  const [events, setEvents] = useState([PRE_SEEDED_ALERT]);
+  // Events stream from the API via WebSocket
+  const [events, setEvents] = useState([]);
   const [agentRunning, setAgentRunning] = useState(false);
   const [wsStatus, setWsStatus] = useState("connecting");
   // Initial tab: ?tab=<key> in the URL wins so hidden tabs (e.g. ?tab=security)
@@ -3644,8 +3622,8 @@ export default function App() {
         try { await fetch(`${API}/api/proposals`, { method: "DELETE" }); } catch {}
         // Clear the reasoning log too, but keep the pre-seeded Act 3 ALERT
         // so the "earlier today" security event survives the reset for
-        // the demo narrative ("ORCA was watching the whole time").
-        setEvents([PRE_SEEDED_ALERT]);
+        // the demo narrative.
+        setEvents([]);
       }
       setTimeout(async () => { try { const sr = await fetch(`${API}/api/state`); setState(await sr.json()); } catch {} }, 400);
     } catch {}
