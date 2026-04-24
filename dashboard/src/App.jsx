@@ -1370,6 +1370,121 @@ const GATE_COLOR = {
   pending: { bg: "#eab30818",    fg: C.yellow, icon: "•" },
 };
 
+// ─── V2 EMAIL ROW ────────────────────────────────────────────────────────────
+// Compact outbox row. Click-to-expand detail is deferred to Prompt 7 — for
+// now the row shows enough preview content (recipient, subject, first
+// ~120 chars of body, attachment count, status badge) to read in the
+// panel without opening anything.
+const V2_EMAIL_STATUS = {
+  draft:  { bg: "rgba(234,179,8,0.14)", fg: C.yellow, label: "DRAFT"  },
+  sent:   { bg: "rgba(16,185,129,0.14)", fg: C.green,  label: "SENT"   },
+  failed: { bg: "rgba(239,68,68,0.14)",  fg: C.red,    label: "FAILED" },
+};
+const V2_EMAIL_STRIPE = {
+  internal_ops: C.blue,      // cyan stripe for NOC notifications
+  external_tac: C.yellow,    // amber stripe for TAC handoffs
+};
+
+function V2EmailRow({ email, onSend, onDiscard }) {
+  const s = V2_EMAIL_STATUS[email.status] || V2_EMAIL_STATUS.draft;
+  const stripe = V2_EMAIL_STRIPE[email.type] || C.muted;
+  const isDraft = email.status === "draft";
+  const ts = (() => {
+    try {
+      const d = new Date(email.created_at);
+      return isNaN(d.getTime()) ? "" : d.toLocaleTimeString();
+    } catch { return ""; }
+  })();
+  const preview = (email.body || "").replace(/\n+/g, " · ").slice(0, 120)
+    + ((email.body || "").length > 120 ? "…" : "");
+  const toLabel = Array.isArray(email.to) ? email.to.join(", ") : (email.to || "");
+  const atts = Array.isArray(email.attachments) ? email.attachments : [];
+
+  return (
+    <div
+      onClick={() => {/* Prompt 7 will wire expansion here */}}
+      style={{
+        background: "rgba(255,255,255,0.02)",
+        border: `1px solid ${C.border}`,
+        borderLeft: `3px solid ${stripe}`,
+        borderRadius: 6,
+        padding: "8px 10px",
+        marginBottom: 8,
+        cursor: "pointer",
+        transition: "background 0.15s",
+      }}
+      onMouseEnter={e => e.currentTarget.style.background = "rgba(255,255,255,0.035)"}
+      onMouseLeave={e => e.currentTarget.style.background = "rgba(255,255,255,0.02)"}
+    >
+      {/* Top line: recipient + timestamp */}
+      <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 8, marginBottom: 3 }}>
+        <span style={{
+          fontSize: FS.body, fontWeight: 700, color: C.text,
+          overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+        }}>{toLabel}</span>
+        <span style={{
+          fontSize: FS.logTimestamp, color: C.muted, fontFamily: "monospace",
+          flexShrink: 0,
+        }}>{ts}</span>
+      </div>
+      {/* Subject */}
+      <div style={{
+        fontSize: FS.emailSubject, fontWeight: 700, color: C.text,
+        lineHeight: 1.35, wordBreak: "break-word", marginBottom: 4,
+      }}>
+        {email.subject}
+      </div>
+      {/* Preview snippet */}
+      <div style={{
+        fontSize: FS.emailBody, color: C.muted, lineHeight: 1.4,
+        wordBreak: "break-word",
+        display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical",
+        overflow: "hidden",
+      }}>
+        {preview}
+      </div>
+      {/* Footer: attachments + status + actions */}
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 7, flexWrap: "wrap" }}>
+        {atts.length > 0 && (
+          <span style={{ fontSize: FS.logBadge, color: C.muted, fontFamily: "monospace" }}>
+            📎 {atts.length} attachment{atts.length === 1 ? "" : "s"}
+          </span>
+        )}
+        <span style={{
+          fontSize: FS.logBadge, fontWeight: 700, padding: "2px 8px", borderRadius: 4,
+          background: s.bg, color: s.fg, fontFamily: "monospace", letterSpacing: 0.5,
+        }}>{s.label}</span>
+        <div style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
+          {isDraft ? (
+            <>
+              <button
+                onClick={e => { e.stopPropagation(); onSend && onSend(); }}
+                style={{
+                  fontSize: FS.logBadge, fontWeight: 700, padding: "3px 10px", borderRadius: 4,
+                  background: C.green + "22", color: C.green,
+                  border: `1px solid ${C.green}44`, cursor: "pointer",
+                }}
+              >Send</button>
+              <button
+                onClick={e => { e.stopPropagation(); onDiscard && onDiscard(); }}
+                style={{
+                  fontSize: FS.logBadge, fontWeight: 600, padding: "3px 10px", borderRadius: 4,
+                  background: "transparent", color: C.muted,
+                  border: `1px solid ${C.border}`, cursor: "pointer",
+                }}
+              >Discard</button>
+            </>
+          ) : email.sent_at ? (
+            <span style={{ fontSize: FS.logBadge, color: C.muted, fontFamily: "monospace" }}>
+              sent {new Date(email.sent_at).toLocaleTimeString()}
+            </span>
+          ) : null}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function V2ProposalCard({ p, isPulsing, isNew, isDeploying, onApprove, onReject }) {
   const status = STATUS_STYLE[p.status] || STATUS_STYLE.pending;
   const gates  = p.validation_gates || [];
@@ -1636,6 +1751,30 @@ function OperationsTab({ state, events, agentRunning, wsStatus, onToggleAgent, o
     }
   }, [events, fetchV2]);
 
+  // ── v2 Email Outbox ──
+  const [v2Emails, setV2Emails] = useState([]);
+  const fetchV2Emails = useCallback(async () => {
+    try {
+      const r = await fetch(`${API}/api/v2/emails`);
+      const d = await r.json();
+      setV2Emails(d.emails || []);
+    } catch {}
+  }, []);
+  useEffect(() => {
+    fetchV2Emails();
+    const t = setInterval(fetchV2Emails, 4000);
+    return () => clearInterval(t);
+  }, [fetchV2Emails]);
+  // Refetch immediately on outbox WebSocket events so Send / Discard /
+  // email_created land in the UI within a frame.
+  useEffect(() => {
+    const last = events[events.length - 1];
+    if (!last) return;
+    if (last.type === "email_created" || last.type === "email_updated" || last.type === "emails_cleared") {
+      fetchV2Emails();
+    }
+  }, [events, fetchV2Emails]);
+
   // Pulse card when its status changes (pending→approved→deployed etc).
   useEffect(() => {
     const prev = prevStatusRef.current;
@@ -1755,11 +1894,29 @@ function OperationsTab({ state, events, agentRunning, wsStatus, onToggleAgent, o
     </Panel>
   );
 
+  // v2 Email Outbox action handlers — call the backend, rely on the
+  // broadcast event to refresh v2Emails state (fetchV2Emails hook above).
+  const v2EmailSend = async (id) => {
+    try { await fetch(`${API}/api/v2/emails/${id}/send`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: "{}",
+    }); } catch {}
+    fetchV2Emails();
+  };
+  const v2EmailDiscard = async (id) => {
+    try { await fetch(`${API}/api/v2/emails/${id}/discard`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: "{}",
+    }); } catch {}
+    fetchV2Emails();
+  };
+
+  const v2DraftCount = v2Emails.filter(e => e.status === "draft").length;
   const EmailsPane = (
-    <Panel title="📧 Email Outbox" badge={emails.length} style={{ height: "100%", minHeight: 0 }}>
-      {emails.length === 0 ? (
-        <div style={{ fontSize: 11, color: C.muted, textAlign: "center", paddingTop: 8 }}>No queued emails</div>
-      ) : emails.map(e => <EmailCard key={e.id} email={e} onEdit={() => setEmailModal(e)} />)}
+    <Panel title="📧 Email Outbox" badge={v2DraftCount} style={{ height: "100%", minHeight: 0 }}>
+      {v2Emails.length === 0 ? (
+        <div style={{ fontSize: FS.body, color: C.muted, textAlign: "center", paddingTop: 8 }}>No queued emails</div>
+      ) : v2Emails.map(e => (
+        <V2EmailRow key={e.id} email={e} onSend={() => v2EmailSend(e.id)} onDiscard={() => v2EmailDiscard(e.id)} />
+      ))}
     </Panel>
   );
 
@@ -2342,29 +2499,37 @@ function ChurnTab({ events }) {
 
   const sliceAColor = "#a855f7";  // matches topology slice-A purple
   const sliceA = displayed.cohorts.find(c => c.id === "slice-a");
+  // Only the two causally-tied metrics get delta chips. Forecast
+  // Confidence is a static baseline — no chip, no implied movement.
   const deltaChips = {
     at_risk: displayed.phase === "recovered" ? "▼ 409 last minute" : "▲ 47 last hour",
     revenue: displayed.phase === "recovered" ? "▼ $1.16M last minute" : "▲ $230K last hour",
-    forecast: displayed.phase === "recovered" ? "▲ 5 points" : "steady",
+    forecast: null,
   };
   const deltaColor = displayed.phase === "recovered" ? C.green : C.muted;
 
   return (
     <div style={{ height: "100%", display: "flex", flexDirection: "column", gap: 12, padding: 12, overflow: "auto", position: "relative" }}>
 
-      {/* Subdued demo-reset affordance top-right */}
+      {/* Subdued demo-only reset — icon only, muted, tooltip on hover */}
       <button
         onClick={handleDemoResetChurn}
-        title="Reset churn numbers to baseline (demo rehearsal only — does not touch scenarios or proposals)"
+        title="Reset churn state (demo only)"
+        aria-label="Reset churn state (demo only)"
         style={{
           position: "absolute", top: 6, right: 10,
-          padding: "3px 9px", borderRadius: 4,
-          fontSize: FS.logBadge, fontWeight: 600,
-          background: "rgba(255,255,255,0.03)", color: "#475569",
-          border: `1px solid ${C.border}`, cursor: "pointer",
-          opacity: 0.6,
+          width: 22, height: 22, padding: 0,
+          display: "flex", alignItems: "center", justifyContent: "center",
+          fontSize: 14, lineHeight: 1,
+          background: "transparent", color: "#475569",
+          border: `1px solid ${C.border}`, borderRadius: "50%",
+          cursor: "pointer",
+          opacity: 0.35,
+          transition: "opacity 0.15s",
         }}
-      >↺ churn-only reset</button>
+        onMouseEnter={e => e.currentTarget.style.opacity = "0.75"}
+        onMouseLeave={e => e.currentTarget.style.opacity = "0.35"}
+      >↻</button>
 
       {/* REGION A — top summary band */}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, flexShrink: 0 }}>
@@ -2383,9 +2548,11 @@ function ChurnTab({ events }) {
               <span style={{ fontSize: "clamp(24px, 2.2vw, 36px)", fontWeight: 700, fontFamily: "monospace", color: C.text, transition: "color 0.4s" }}>
                 {c.value}
               </span>
-              <span style={{ fontSize: FS.logBadge, fontWeight: 600, fontFamily: "monospace", color: deltaColor }}>
-                {c.chip}
-              </span>
+              {c.chip && (
+                <span style={{ fontSize: FS.logBadge, fontWeight: 600, fontFamily: "monospace", color: deltaColor }}>
+                  {c.chip}
+                </span>
+              )}
             </div>
           </div>
         ))}

@@ -363,6 +363,40 @@ async def _deploy(p: dict, broadcast) -> None:
                         "proposal_id":      p["id"],
                     },
                 })
+
+            # ── Draft the matching outbound email (Act 1 NOC / Act 2 TAC) ──
+            # 500ms after the 'deployed' broadcast. Email is a DRAFT —
+            # operator clicks Send to dispatch.
+            from agent import v2_emails
+            factory   = v2_emails.EMAIL_FACTORIES.get(scenario_id)
+            log_line  = v2_emails.DRAFTED_SYSTEM_LOG.get(scenario_id)
+            if factory:
+                await asyncio.sleep(0.5)
+                drafted = v2_emails.create(factory(p))
+                await broadcast({
+                    "type":      "email_created",
+                    "timestamp": datetime.utcnow().isoformat(),
+                    "data": {
+                        "id":                     drafted["id"],
+                        "type":                   drafted["type"],
+                        "subject":                drafted["subject"],
+                        "triggering_proposal_id": p["id"],
+                    },
+                })
+                if log_line:
+                    await broadcast({
+                        "type":      "scenario_log",
+                        "timestamp": datetime.utcnow().isoformat(),
+                        "data": {
+                            "seq":           -3,
+                            "subtype":       "system",
+                            "content":       log_line,
+                            "is_conclusion": False,
+                            "scenario_id":   scenario_id,
+                            "proposal_id":   p["id"],
+                            "email_id":      drafted["id"],
+                        },
+                    })
     finally:
         _deploying.discard(p["id"])
 

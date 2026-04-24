@@ -276,8 +276,11 @@ SCENARIO_RECOVERY_ENTRIES = {
         {"delay_ms": 400, "content": "Slice-A p99 N3 latency recovered: 13.1 ms → 8.9 ms · SLA headroom restored"},
     ],
     "transport-congestion-upf-innocent": [
+        # Note: the old "TAC email dispatched" line used to live here
+        # (Prompt 4). Removed in Prompt 6 — the email is now a draft in
+        # the Outbox, not a fait accompli. The "email drafted" system
+        # log comes from v2_emails on deploy hook instead.
         {"delay_ms": 200, "content": "PFCP session modification batch complete · 180 slice-A sessions re-routed via alternate path · bypassing congested LSP-1"},
-        {"delay_ms": 300, "content": "TAC email dispatched to operator transport team · awaiting external resolution of PE-01 ↔ P-02 congestion"},
         {"delay_ms": 400, "content": "Nokia-domain impact contained · slice-A p99 N3 latency recovered"},
     ],
 }

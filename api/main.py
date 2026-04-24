@@ -15,6 +15,7 @@ from agent.notifications import send_email, build_tac_email, get_pending_emails,
 from agent import v2_proposals
 from agent import scenarios as v2_scenarios
 from agent import churn_state
+from agent import v2_emails
 
 adapter = ContainerlabAdapter()
 agent = ORCAAgent(adapter=adapter)
@@ -134,12 +135,18 @@ async def reset_network():
                              reset_baseline=_reset_to_baseline)
     _reset_to_baseline()
     v2_proposals.clear_proposals()
-    clear_emails()  # demo rerun hygiene
+    clear_emails()           # v1 email queue (baseline test compat)
+    v2_emails.clear_all()    # v2 outbox — drafts + sent
     churn_state.reset()
     await manager.broadcast({
         "type": "churn_updated",
         "timestamp": datetime.utcnow().isoformat(),
         "data": {"phase": "baseline"},
+    })
+    await manager.broadcast({
+        "type": "emails_cleared",
+        "timestamp": datetime.utcnow().isoformat(),
+        "data": {},
     })
     asyncio.create_task(_broadcast_state())
     return {"status": "reset", "message": "Network reset to baseline"}
@@ -177,15 +184,77 @@ async def reset_scenarios():
         reset_baseline=_reset_to_baseline,
     )
     v2_proposals.clear_proposals()
-    clear_emails()  # demo rerun hygiene (will be populated in Prompt 6)
+    clear_emails()
+    v2_emails.clear_all()
     churn_state.reset()
     await manager.broadcast({
         "type": "churn_updated",
         "timestamp": datetime.utcnow().isoformat(),
         "data": {"phase": "baseline"},
     })
+    await manager.broadcast({
+        "type": "emails_cleared",
+        "timestamp": datetime.utcnow().isoformat(),
+        "data": {},
+    })
     asyncio.create_task(_broadcast_state())
     return {**r, "state": "baseline"}
+
+# ── v2 Email Outbox ─────────────────────────────────────────────────────────
+# Distinct from v1 /api/emails (which backs baseline tests). Act 1 approval
+# drafts an internal NOC notification; Act 2 drafts an external TAC handoff.
+# See agent/v2_emails.py for templates + store.
+
+class V2EmailAction(BaseModel):
+    comment: str = ""
+
+@app.get("/api/v2/emails")
+async def v2_list_emails():
+    return {"emails": v2_emails.get_emails()}
+
+@app.post("/api/v2/emails/{email_id}/send")
+async def v2_send_email(email_id: str, body: V2EmailAction = V2EmailAction()):
+    e = v2_emails.mark_sent(email_id)
+    if not e:
+        return {"error": "not found or not in draft state"}
+    to_s = ", ".join(e.get("to", []))
+    subj = (e.get("subject", "") or "")[:80]
+    await manager.broadcast({
+        "type":      "agent_status",
+        "timestamp": datetime.utcnow().isoformat(),
+        "data": {
+            "status":  "email_sent",
+            "message": f"✉ {to_s} email dispatched · subject: {subj}",
+        },
+    })
+    await manager.broadcast({
+        "type": "email_updated", "timestamp": datetime.utcnow().isoformat(),
+        "data": {"id": email_id, "status": "sent"},
+    })
+    return e
+
+@app.post("/api/v2/emails/{email_id}/discard")
+async def v2_discard_email(email_id: str, body: V2EmailAction = V2EmailAction()):
+    # Grab the subject before deletion for the log entry
+    all_emails = v2_emails.get_emails()
+    existing = next((e for e in all_emails if e.get("id") == email_id), None)
+    subj = ((existing or {}).get("subject", "") or "")[:80]
+    ok = v2_emails.discard(email_id)
+    if not ok:
+        return {"error": "not found"}
+    await manager.broadcast({
+        "type":      "agent_status",
+        "timestamp": datetime.utcnow().isoformat(),
+        "data": {
+            "status":  "email_discarded",
+            "message": f"✗ Email draft discarded by operator · {subj}",
+        },
+    })
+    await manager.broadcast({
+        "type": "email_updated", "timestamp": datetime.utcnow().isoformat(),
+        "data": {"id": email_id, "status": "discarded"},
+    })
+    return {"status": "discarded", "id": email_id}
 
 # ── v2 Churn Forecast ─────────────────────────────────────────────────────────
 # Dashboard-flavor state; not a real churn model. Act 1 approval flips

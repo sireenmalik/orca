@@ -125,13 +125,13 @@ _state: dict = {
 def _compute_totals(cohorts: list) -> dict:
     at_risk_total = sum(c["at_risk"] for c in cohorts)
     revenue_at_risk = sum(c["arr_exposed_usd"] for c in cohorts)
-    # Forecast confidence: stylistic — a touch higher after recovery (less
-    # uncertainty because the dominant risk factor just resolved).
-    conf = 92 if at_risk_total < 500 else 87
+    # Forecast confidence is a static contextual metric (baseline model
+    # confidence), not a per-event outcome. Holding at 87 to avoid the
+    # "why did THAT number move?" question during the PM narration.
     return {
         "at_risk_total":       at_risk_total,
         "revenue_at_risk_usd": revenue_at_risk,
-        "forecast_confidence": conf,
+        "forecast_confidence": 87,
     }
 
 
