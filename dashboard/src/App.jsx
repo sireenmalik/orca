@@ -13,6 +13,58 @@ const C = {
 const utilColor = u => u >= 90 ? C.red : u >= 80 ? C.orange : u >= 60 ? C.yellow : C.green;
 const sevColor = { critical: "#ef4444", high: "#f97316", medium: "#eab308", warning: "#eab308", low: "#06b6d4", info: "#8b5cf6" };
 
+// ─── FLUID TYPOGRAPHY ─────────────────────────────────────────────────────────
+// Every text size is clamp(teams-safe-min, viewport-responsive-preferred,
+// 27"-monitor-cap). Viewport-based so the dashboard stays readable over a
+// Teams screen share (typically compressed to ~1280px wide for the viewer)
+// without ballooning on a 2560px display. Read DEMO_README "pre-flight
+// checklist" before tuning any of these — there's a Teams-share test that
+// must pass on: logEntry, proposalReason, sliceName, topoLspLabel.
+const FS = {
+  // Generic
+  body:            "clamp(13px, 1.0vw, 15px)",
+  header:          "clamp(14px, 1.15vw, 17px)",
+  tabNav:          "clamp(13px, 1.05vw, 15px)",
+  // Agent reasoning log
+  logEntry:        "clamp(14px, 1.15vw, 17px)",
+  logTimestamp:    "clamp(11px, 0.85vw, 13px)",
+  logBadge:        "clamp(10px, 0.8vw, 12px)",
+  // Config proposals
+  proposalTitle:   "clamp(15px, 1.2vw, 18px)",
+  proposalReason:  "clamp(13px, 1.1vw, 16px)",
+  diff:            "clamp(13px, 1.1vw, 16px)",
+  validationLabel: "clamp(12px, 1.0vw, 14px)",
+  // LSP sidebar
+  lspName:         "clamp(13px, 1.0vw, 15px)",
+  lspPath:         "clamp(12px, 0.95vw, 14px)",
+  lspBandwidth:    "clamp(12px, 0.95vw, 14px)",
+  // Slice legend (HTML portion of topology)
+  sliceName:       "clamp(13px, 1.0vw, 15px)",
+  sliceMeta:       "clamp(12px, 0.95vw, 14px)",
+  // SVG labels on the topology canvas (set via .style not .attr so clamp parses)
+  topoUtil:        "clamp(12px, 0.95vw, 14px)",
+  topoLspLabel:    "clamp(12px, 0.95vw, 14px)",
+  topoNodeLabel:   "clamp(11px, 0.9vw, 13px)",
+  // Alarms
+  alarm:           "clamp(13px, 1.05vw, 15px)",
+  alarmSev:        "clamp(11px, 0.9vw, 13px)",
+  // Email outbox
+  emailSubject:    "clamp(13px, 1.05vw, 15px)",
+  emailBody:       "clamp(12px, 1.0vw, 14px)",
+};
+
+// Minimum sizes (px) for each resizable pane — enforced in Split via minPx.
+// Below these the content becomes unreadable on a Teams share.
+const MIN = {
+  topology:     { w: 600, h: 400 },
+  agentLog:     { w: 340, h: 320 },
+  configProps:  { w: 400, h: 220 },
+  lspsSidebar:  { w: 240, h: 300 },
+  alarms:       { w: 260, h: 160 },
+  emails:       { w: 260, h: 180 },
+  controlsBar:  { w: 0,   h: 50  },
+};
+
 // ─── CHURN CHART DATA (static — drives the forecast sparkline in ChurnTab) ───
 const churnHistory = [
   { m: "Nov", v: 3.1 },
@@ -44,25 +96,56 @@ const churnForecast = [
 // Children must be valid elements (one per pane). Size count must match
 // children count, summing to ~100. minPct keeps a pane from being dragged
 // to zero width/height.
-function Split({ direction = "horizontal", defaultSizes, children, minPct = 6, dividerColor }) {
+function Split({ direction = "horizontal", defaultSizes, minPx, storageKey, children, minPct = 4, dividerColor }) {
   const arr = Array.isArray(children) ? children.filter(Boolean) : [children];
   const containerRef = useRef(null);
-  const [sizes, setSizes] = useState(
-    defaultSizes && defaultSizes.length === arr.length
+  // Hydrate from localStorage if a key is provided; tolerate malformed values.
+  const initial = (() => {
+    if (storageKey) {
+      try {
+        const raw = localStorage.getItem(storageKey);
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed) && parsed.length === arr.length
+              && parsed.every(n => typeof n === "number" && n > 0)) {
+            return parsed;
+          }
+        }
+      } catch { /* ignore */ }
+    }
+    return defaultSizes && defaultSizes.length === arr.length
       ? defaultSizes
-      : Array(arr.length).fill(100 / arr.length)
-  );
+      : Array(arr.length).fill(100 / arr.length);
+  })();
+  const [sizes, setSizes] = useState(initial);
   const dragState = useRef(null);
   const isHoriz = direction === "horizontal";
+
+  // Persist on every settled change. Cheap write, debounced via state update.
+  useEffect(() => {
+    if (!storageKey) return;
+    try { localStorage.setItem(storageKey, JSON.stringify(sizes)); } catch { /* ignore quota */ }
+  }, [sizes, storageKey]);
 
   const onDividerDown = (i) => (e) => {
     e.preventDefault();
     const rect = containerRef.current.getBoundingClientRect();
+    const totalPx = isHoriz ? rect.width : rect.height;
+    // Convert per-pane pixel minimums to per-pane percent mins for this
+    // frame. If minPx isn't supplied, fall back to the global minPct floor.
+    const pctMin = (i_) => {
+      if (minPx && minPx[i_] != null && totalPx > 0) {
+        return Math.max(minPct, (minPx[i_] / totalPx) * 100);
+      }
+      return minPct;
+    };
     dragState.current = {
       idx: i,
       startCoord: isHoriz ? e.clientX : e.clientY,
       startSizes: [...sizes],
-      total: isHoriz ? rect.width : rect.height,
+      total: totalPx,
+      minA: pctMin(i),
+      minB: pctMin(i + 1),
     };
     const onMove = (me) => {
       const ds = dragState.current;
@@ -70,13 +153,16 @@ function Split({ direction = "horizontal", defaultSizes, children, minPct = 6, d
       const deltaPx = (isHoriz ? me.clientX : me.clientY) - ds.startCoord;
       const deltaPct = (deltaPx / ds.total) * 100;
       const next = [...ds.startSizes];
-      const a = ds.startSizes[ds.idx] + deltaPct;
-      const b = ds.startSizes[ds.idx + 1] - deltaPct;
-      if (a >= minPct && b >= minPct) {
-        next[ds.idx] = a;
-        next[ds.idx + 1] = b;
-        setSizes(next);
-      }
+      let a = ds.startSizes[ds.idx] + deltaPct;
+      let b = ds.startSizes[ds.idx + 1] - deltaPct;
+      // Clamp at either minimum — if we hit one, snap to it instead of
+      // discarding the drag (so the handle physically stops at the min
+      // rather than refusing to move).
+      if (a < ds.minA) { a = ds.minA; b = ds.startSizes[ds.idx] + ds.startSizes[ds.idx + 1] - a; }
+      if (b < ds.minB) { b = ds.minB; a = ds.startSizes[ds.idx] + ds.startSizes[ds.idx + 1] - b; }
+      next[ds.idx] = a;
+      next[ds.idx + 1] = b;
+      setSizes(next);
     };
     const onUp = () => {
       dragState.current = null;
@@ -146,8 +232,8 @@ function Panel({ title, badge, children, style }) {
     <div style={{ background: C.panel, border: `1px solid ${C.border}`, borderRadius: 8, display: "flex", flexDirection: "column", overflow: "hidden", ...style }}>
       {title && (
         <div style={{ padding: "10px 14px", borderBottom: `1px solid ${C.border}`, display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0 }}>
-          <span style={{ fontSize: 12, fontWeight: 700, color: C.text, letterSpacing: 0.3 }}>{title}</span>
-          {badge != null && badge > 0 && <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 10, background: C.red + "22", color: C.red, fontFamily: "monospace" }}>{badge}</span>}
+          <span style={{ fontSize: FS.header, fontWeight: 700, color: C.text, letterSpacing: 0.3 }}>{title}</span>
+          {badge != null && badge > 0 && <span style={{ fontSize: FS.logBadge, fontWeight: 700, padding: "2px 7px", borderRadius: 10, background: C.red + "22", color: C.red, fontFamily: "monospace" }}>{badge}</span>}
         </div>
       )}
       <div style={{ flex: 1, overflow: "auto", padding: 12 }}>{children}</div>
@@ -241,9 +327,9 @@ function TopologyMap({ nodes, links, lsps, slices }) {
     const NODE_R  = 22 * scale;
     const RECT_W  = 64 * scale;
     const RECT_H  = 36 * scale;
-    const NODE_FS = Math.round(11 * scale);
-    const LSP_FS  = Math.max(9, Math.round(11 * scale));
-    const UTIL_FS = Math.max(10, Math.round(15 * scale));
+    // Topology label font sizes now come from FS.topoUtil / FS.topoLspLabel /
+    // FS.topoNodeLabel (viewport-driven clamp) — the panel-local `scale`
+    // only shapes node geometry, not text.
 
     const padX = Math.max(28, 55 * scale);
     const padY = Math.max(30, 50 * scale);
@@ -300,7 +386,7 @@ function TopologyMap({ nodes, links, lsps, slices }) {
         .attr("y", d => (d.s.y + d.t.y) / 2 - 7)
         .attr("text-anchor", "middle")
         .attr("fill", d => d.state === "down" ? C.red : utilColor(d.util))
-        .attr("font-size", UTIL_FS + "px").attr("font-family", "monospace").attr("font-weight", "bold")
+        .style("font-size", FS.topoUtil).style("font-family", "monospace").style("font-weight", "bold")
         .text(d => d.state === "down" ? "DOWN" : `${d.util.toFixed(0)}%`);
 
     // 3. LSP overlay paths — one routed polyline per LSP (slice A + B)
@@ -347,9 +433,9 @@ function TopologyMap({ nodes, links, lsps, slices }) {
         })
         .attr("text-anchor", "middle")
         .attr("fill", d => SLICE_COLOR[Object.values(slices || {}).find(s => s.lsp === d.id)?.id] || C.purple)
-        .attr("font-size", LSP_FS + "px")
-        .attr("font-family", "monospace")
-        .attr("font-weight", "700")
+        .style("font-size", FS.topoLspLabel)
+        .style("font-family", "monospace")
+        .style("font-weight", "700")
         .text(d => {
           const slice = Object.values(slices || {}).find(s => s.lsp === d.id);
           return slice ? `${d.id} · ${slice.id}` : d.id;
@@ -411,36 +497,54 @@ function TopologyMap({ nodes, links, lsps, slices }) {
         .attr("text-anchor", "middle")
         .attr("dominant-baseline", "middle")
         .attr("fill", style.label)
-        .attr("font-size", (d.role === "ran" || d.role === "upf" ? Math.max(9, NODE_FS - 1) : NODE_FS) + "px")
-        .attr("font-weight", "700")
-        .attr("font-family", "monospace")
+        .style("font-size", FS.topoNodeLabel)
+        .style("font-weight", "700")
+        .style("font-family", "monospace")
         .attr("y", d.role === "upf" ? RECT_H / 2 - 8 : 0)
         .text(d.id);
     });
 
-    // 5. Legend (bottom-right, slice A + B)
+    // 5. Legend — default bottom-right. If the panel is too narrow to fit
+    // the full legend (280px) plus a margin, shrink to 2 rows per slice
+    // (path on line 1, metadata on line 2). If the panel is really narrow
+    // (<400px), move the legend to bottom-left so it doesn't clip and
+    // reduce to 1 line per slice. If narrower than that, hide it entirely
+    // — the user is clearly probing the min size, not presenting.
     const sliceRows = Object.values(slices || {});
-    if (sliceRows.length) {
-      const lgW = 280, lgH = 22 * sliceRows.length + 18;
-      const lgX = W - lgW - 14, lgY = H - lgH - 10;
+    if (sliceRows.length && W >= 280) {
+      const twoLine = W < 560;  // path + metadata stacked
+      const lgWideRaw = twoLine ? Math.min(260, W - 28) : 300;
+      const lgW = Math.max(200, Math.min(lgWideRaw, W - 28));
+      const rowH = twoLine ? 32 : 22;
+      const lgH = rowH * sliceRows.length + 18;
+      // Default bottom-right; if tight, bottom-left to stay visible
+      const preferRight = (W - lgW - 14) > 10;
+      const lgX = preferRight ? W - lgW - 14 : 14;
+      const lgY = H - lgH - 10;
       const lg = svg.append("g");
       lg.append("rect")
         .attr("x", lgX).attr("y", lgY)
         .attr("width", lgW).attr("height", lgH)
         .attr("rx", 6)
-        .attr("fill", "rgba(17,24,39,0.92)")
+        .attr("fill", "rgba(17,24,39,0.95)")
         .attr("stroke", C.border);
       sliceRows.forEach((s, i) => {
-        const y = lgY + 18 + i * 22;
+        const y = lgY + 18 + i * rowH;
         lg.append("circle").attr("cx", lgX + 14).attr("cy", y - 4).attr("r", 5)
           .attr("fill", SLICE_COLOR[s.id] || C.muted);
         lg.append("text").attr("x", lgX + 26).attr("y", y)
-          .attr("fill", C.text).attr("font-size", "11px").attr("font-family", "monospace")
+          .attr("fill", C.text).style("font-size", FS.sliceName).style("font-family", "monospace").style("font-weight", "700")
           .text(`${s.id.toUpperCase()} · ${s.gnb} → ${s.lsp} → ${s.upf}`);
-        lg.append("text").attr("x", lgX + lgW - 12).attr("y", y)
-          .attr("fill", C.muted).attr("font-size", "10px").attr("font-family", "monospace")
-          .attr("text-anchor", "end")
-          .text(`${s.subscribers.toLocaleString()} subs · SLA ${s.sla_latency_ms}ms`);
+        if (twoLine) {
+          lg.append("text").attr("x", lgX + 26).attr("y", y + 14)
+            .attr("fill", C.muted).style("font-size", FS.sliceMeta).style("font-family", "monospace")
+            .text(`${s.subscribers.toLocaleString()} subs · SLA ${s.sla_latency_ms}ms`);
+        } else {
+          lg.append("text").attr("x", lgX + lgW - 12).attr("y", y)
+            .attr("fill", C.muted).style("font-size", FS.sliceMeta).style("font-family", "monospace")
+            .attr("text-anchor", "end")
+            .text(`${s.subscribers.toLocaleString()} subs · SLA ${s.sla_latency_ms}ms`);
+        }
       });
     }
   }, [stateKey]);
@@ -488,13 +592,31 @@ const LogEntry = memo(function LogEntry({ entry }) {
     const d = new Date(ms);
     return isNaN(d.getTime()) ? "" : d.toLocaleTimeString();
   })();
+  const msgStr = typeof msg === "string" ? msg : "";
   return (
     <div style={{ padding: "8px 10px", marginBottom: 4, borderRadius: 6, background: s.bg, borderLeft: `2px solid ${s.color}` }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 3 }}>
-        <span style={{ fontSize: 9, fontWeight: 700, padding: "1px 5px", borderRadius: 3, background: s.color + "22", color: s.color, fontFamily: "monospace" }}>{s.label}</span>
-        {ts && <span style={{ fontSize: 9, color: C.muted, fontFamily: "monospace" }}>{ts}</span>}
+        <span style={{ fontSize: FS.logBadge, fontWeight: 700, padding: "1px 6px", borderRadius: 3, background: s.color + "22", color: s.color, fontFamily: "monospace" }}>{s.label}</span>
+        {ts && <span style={{ fontSize: FS.logTimestamp, color: C.muted, fontFamily: "monospace" }}>{ts}</span>}
       </div>
-      <div style={{ fontSize: 12, color: C.text, lineHeight: 1.6, fontFamily: entry.type === "tool_call" || entry.type === "tool_result" || entry.type === "git_command" ? "monospace" : "inherit" }}>
+      {/* Line-clamp at 3 lines; full text on hover via title attr. Word-break
+          keeps long tool-result strings from horizontal-scrolling the panel. */}
+      <div
+        title={msgStr}
+        style={{
+          fontSize: FS.logEntry,
+          fontWeight: 600,
+          color: C.text,
+          lineHeight: 1.45,
+          fontFamily: entry.type === "tool_call" || entry.type === "tool_result" || entry.type === "git_command" ? "monospace" : "inherit",
+          display: "-webkit-box",
+          WebkitLineClamp: 3,
+          WebkitBoxOrient: "vertical",
+          overflow: "hidden",
+          wordBreak: "break-word",
+          whiteSpace: "pre-wrap",
+        }}
+      >
         {msg}
       </div>
     </div>
@@ -1051,20 +1173,26 @@ function EmailCard({ email: e, onEdit }) {
         <div onClick={() => setExpanded(!expanded)} style={{ padding: "10px 12px", cursor: "pointer" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start" }}>
             <div style={{ flex: 1, marginRight: 8 }}>
-              <div style={{ fontSize: 10, color: C.muted, fontFamily: "monospace", marginBottom: 3 }}>To: {e.to}</div>
-              <div style={{ fontSize: 12, fontWeight: 600, color: C.text }}>{e.subject}</div>
+              <div style={{ fontSize: FS.logBadge, color: C.muted, fontFamily: "monospace", marginBottom: 3 }}>To: {e.to}</div>
+              <div style={{ fontSize: FS.emailSubject, fontWeight: 600, color: C.text, wordBreak: "break-word" }}>{e.subject}</div>
             </div>
             <div style={{ display: "flex", gap: 6, alignItems: "center", flexShrink: 0 }}>
               <button onClick={ev => { ev.stopPropagation(); setFullscreen(true); }} style={{
-                padding: "2px 8px", borderRadius: 4, fontSize: 9, fontWeight: 700, cursor: "pointer",
+                padding: "2px 8px", borderRadius: 4, fontSize: FS.logBadge, fontWeight: 700, cursor: "pointer",
                 background: C.blue + "18", border: `1px solid ${C.blue}44`, color: C.blue,
               }}>⤢ View</button>
-              <span style={{ fontSize: 9, color: C.muted }}>{expanded ? "▲" : "▼"}</span>
+              <span style={{ fontSize: FS.logBadge, color: C.muted }}>{expanded ? "▲" : "▼"}</span>
             </div>
           </div>
           {!expanded && (
-            <div style={{ fontSize: 11, color: C.muted, marginTop: 4, lineHeight: 1.4 }}>
-              {(e.body || "").slice(0, 100).replace(/\n/g, " ")}...
+            /* Preview — word-break keeps long URLs from horizontal-overflowing;
+               line-clamp at 2 lines truncates with ellipsis at word boundary */
+            <div style={{
+              fontSize: FS.emailBody, color: C.muted, marginTop: 4, lineHeight: 1.45,
+              display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical",
+              overflow: "hidden", wordBreak: "break-word",
+            }}>
+              {(e.body || "").replace(/\n/g, " ")}
             </div>
           )}
         </div>
@@ -1174,22 +1302,25 @@ function OperationsTab({ state, events, agentRunning, wsStatus, onToggleAgent, o
     <div style={{ display: "flex", flexDirection: "column", gap: 8, height: "100%", minHeight: 0 }}>
       <div style={{ background: C.panel, border: `1px solid ${C.border}`, borderRadius: 8, padding: "9px 12px", display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
         <div style={{ width: 8, height: 8, borderRadius: "50%", background: wsStatus === "connected" ? C.green : C.red, boxShadow: `0 0 8px ${wsStatus === "connected" ? C.green : C.red}55` }} />
-        <span style={{ fontSize: 11, color: C.text, fontWeight: 600 }}>{agentRunning ? "Agent Running" : "Agent Stopped"}</span>
-        <button onClick={onToggleAgent} style={{ marginLeft: "auto", padding: "3px 9px", borderRadius: 5, fontSize: 10, fontWeight: 700, background: agentRunning ? C.red + "18" : C.green + "18", border: `1px solid ${agentRunning ? C.red + "44" : C.green + "44"}`, color: agentRunning ? C.red : C.green, cursor: "pointer" }}>
+        <span style={{ fontSize: FS.body, color: C.text, fontWeight: 600 }}>{agentRunning ? "Agent Running" : "Agent Stopped"}</span>
+        <button onClick={onToggleAgent} style={{ marginLeft: "auto", padding: "3px 9px", borderRadius: 5, fontSize: FS.validationLabel, fontWeight: 700, background: agentRunning ? C.red + "18" : C.green + "18", border: `1px solid ${agentRunning ? C.red + "44" : C.green + "44"}`, color: agentRunning ? C.red : C.green, cursor: "pointer" }}>
           {agentRunning ? "⏹ Stop" : "▶ Start"}
         </button>
       </div>
       <Panel title="Active LSPs" style={{ flex: 1, minHeight: 0 }}>
         {visibleLsps.length === 0 ? (
-          <div style={{ fontSize: 11, color: C.muted, textAlign: "center", paddingTop: 8 }}>No LSP data</div>
+          <div style={{ fontSize: FS.body, color: C.muted, textAlign: "center", paddingTop: 8 }}>No LSP data</div>
         ) : visibleLsps.map(([id, l]) => (
-          <div key={id} style={{ padding: "5px 0", borderBottom: `1px solid ${C.border}22`, display: "flex", flexDirection: "column", gap: 2 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <span style={{ fontSize: 10, fontWeight: 700, fontFamily: "monospace", color: C.blue }}>{id}</span>
-              <span style={{ fontSize: 9, padding: "1px 5px", borderRadius: 3, background: l.state === "up" ? C.green + "12" : C.red + "18", color: l.state === "up" ? C.green : C.red, fontFamily: "monospace" }}>{l.state || "up"}</span>
+          <div key={id} style={{ padding: "6px 0", borderBottom: `1px solid ${C.border}22`, display: "flex", flexDirection: "column", gap: 3 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 6 }}>
+              <span style={{ fontSize: FS.lspName, fontWeight: 700, fontFamily: "monospace", color: C.blue }}>{id}</span>
+              <span style={{ fontSize: FS.logBadge, padding: "1px 5px", borderRadius: 3, background: l.state === "up" ? C.green + "12" : C.red + "18", color: l.state === "up" ? C.green : C.red, fontFamily: "monospace", flexShrink: 0 }}>{l.state || "up"}</span>
             </div>
-            <div style={{ fontSize: 10, color: C.muted, fontFamily: "monospace" }}>{(l.path || []).join(" → ")}</div>
-            {l.bandwidth_gbps && <div style={{ fontSize: 9, color: C.muted }}>{l.bandwidth_gbps}Gbps</div>}
+            {/* Path: wrap (don't clip) when sidebar is narrow */}
+            <div style={{ fontSize: FS.lspPath, color: C.muted, fontFamily: "monospace", whiteSpace: "normal", wordBreak: "break-word", lineHeight: 1.4 }}>
+              {(l.path || []).join(" → ")}
+            </div>
+            {l.bandwidth_gbps && <div style={{ fontSize: FS.lspBandwidth, color: C.muted }}>{l.bandwidth_gbps} Gbps</div>}
           </div>
         ))}
       </Panel>
@@ -1199,11 +1330,11 @@ function OperationsTab({ state, events, agentRunning, wsStatus, onToggleAgent, o
   const AlarmsPane = (
     <Panel title="Alarms" badge={alarms.filter(a => a.severity === "critical").length} style={{ height: "100%", minHeight: 0 }}>
       {alarms.length === 0 ? (
-        <div style={{ fontSize: 11, color: C.muted, textAlign: "center", paddingTop: 8 }}>No active alarms</div>
+        <div style={{ fontSize: FS.body, color: C.muted, textAlign: "center", paddingTop: 8 }}>No active alarms</div>
       ) : alarms.slice(-5).map((a, i) => (
-        <div key={i} style={{ padding: "4px 0", borderBottom: i < Math.min(alarms.length, 5) - 1 ? `1px solid ${C.border}` : "none", display: "flex", gap: 6, alignItems: "start" }}>
-          <span style={{ fontSize: 9, fontWeight: 700, padding: "1px 5px", borderRadius: 3, background: (sevColor[a.severity] || C.yellow) + "18", color: sevColor[a.severity] || C.yellow, fontFamily: "monospace", flexShrink: 0, marginTop: 1 }}>{(a.severity || "warn").slice(0,4).toUpperCase()}</span>
-          <span style={{ fontSize: 11, color: C.text, lineHeight: 1.4 }}>{a.description || a.message}</span>
+        <div key={i} style={{ padding: "5px 0", borderBottom: i < Math.min(alarms.length, 5) - 1 ? `1px solid ${C.border}` : "none", display: "flex", gap: 6, alignItems: "start" }}>
+          <span style={{ fontSize: FS.alarmSev, fontWeight: 700, padding: "2px 6px", borderRadius: 3, background: (sevColor[a.severity] || C.yellow) + "18", color: sevColor[a.severity] || C.yellow, fontFamily: "monospace", flexShrink: 0, marginTop: 1 }}>{(a.severity || "warn").slice(0,4).toUpperCase()}</span>
+          <span style={{ fontSize: FS.alarm, color: C.text, lineHeight: 1.4, wordBreak: "break-word" }}>{a.description || a.message}</span>
         </div>
       ))}
     </Panel>
@@ -1223,31 +1354,31 @@ function OperationsTab({ state, events, agentRunning, wsStatus, onToggleAgent, o
               <div style={{ fontSize: 11, color: C.muted, textAlign: "center", paddingTop: 12 }}>No proposals</div>
             ) : proposals.map(cfg => (
               <div key={cfg.id} onClick={() => setConfigModal(cfg)} style={{ background: "rgba(255,255,255,0.02)", border: `1px solid ${C.border}`, borderRadius: 8, padding: 12, marginBottom: 8, cursor: "pointer", borderLeft: `3px solid ${cfg.security ? C.red : C.blue}` }}>
-                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                    {cfg.security && <span style={{ fontSize: 9, padding: "1px 5px", borderRadius: 3, background: C.red + "18", color: C.red, fontFamily: "monospace", fontWeight: 700 }}>SECURITY</span>}
-                    <span style={{ fontSize: 13, fontWeight: 600, color: C.text }}>{cfg.title}</span>
+                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6, gap: 8 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0, flex: 1 }}>
+                    {cfg.security && <span style={{ fontSize: FS.logBadge, padding: "1px 5px", borderRadius: 3, background: C.red + "18", color: C.red, fontFamily: "monospace", fontWeight: 700, flexShrink: 0 }}>SECURITY</span>}
+                    <span style={{ fontSize: FS.proposalTitle, fontWeight: 700, color: C.text, wordBreak: "break-word" }}>{cfg.title}</span>
                   </div>
-                  <span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 4, background: C.yellow + "18", color: C.yellow, fontFamily: "monospace", fontWeight: 700 }}>{cfg.status}</span>
+                  <span style={{ fontSize: FS.logBadge, padding: "2px 8px", borderRadius: 4, background: C.yellow + "18", color: C.yellow, fontFamily: "monospace", fontWeight: 700, flexShrink: 0, alignSelf: "flex-start" }}>{cfg.status}</span>
                 </div>
-                <div style={{ fontSize: 11, color: C.muted, marginBottom: 8, lineHeight: 1.5 }}>{cfg.reason}</div>
-                {cfg.projected_improvement && <div style={{ fontSize: 11, fontFamily: "monospace", color: C.green, marginBottom: 8 }}>Projected: {cfg.projected_improvement}</div>}
+                <div style={{ fontSize: FS.proposalReason, color: C.muted, marginBottom: 8, lineHeight: 1.5, wordBreak: "break-word" }}>{cfg.reason}</div>
+                {cfg.projected_improvement && <div style={{ fontSize: FS.proposalReason, fontFamily: "monospace", color: C.green, marginBottom: 8, wordBreak: "break-word" }}>Projected: {cfg.projected_improvement}</div>}
                 <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginBottom: 10 }}>
                   {Object.entries(cfg.validation_checks || {}).map(([k, v]) => (
-                    <span key={k} style={{ fontSize: 9, padding: "2px 6px", borderRadius: 3, background: v ? C.green + "12" : C.red + "12", color: v ? C.green : C.red, fontFamily: "monospace" }}>{v ? "✓" : "✗"} {k}</span>
+                    <span key={k} style={{ fontSize: FS.validationLabel, fontWeight: 700, padding: "2px 6px", borderRadius: 3, background: v ? C.green + "12" : C.red + "12", color: v ? C.green : C.red, fontFamily: "monospace" }}>{v ? "✓" : "✗"} {k}</span>
                   ))}
                 </div>
-                <div style={{ background: "#0d1117", borderRadius: 6, padding: 8, fontFamily: "monospace", fontSize: 11, lineHeight: 1.7, maxHeight: 120, overflow: "auto" }}>
+                <div style={{ background: "#0d1117", borderRadius: 6, padding: 8, fontFamily: "monospace", fontSize: FS.diff, lineHeight: 1.7, maxHeight: 120, overflow: "auto" }}>
                   {(cfg.diff || []).slice(0, 8).map((d, i) => (
-                    <div key={i} style={{ padding: "1px 6px", background: d.type === "add" ? "rgba(16,185,129,0.08)" : d.type === "remove" ? "rgba(239,68,68,0.08)" : "transparent", color: d.type === "add" ? C.green : d.type === "remove" ? C.red : C.muted }}>
+                    <div key={i} style={{ padding: "1px 6px", background: d.type === "add" ? "rgba(16,185,129,0.08)" : d.type === "remove" ? "rgba(239,68,68,0.08)" : "transparent", color: d.type === "add" ? C.green : d.type === "remove" ? C.red : C.muted, whiteSpace: "pre" }}>
                       {d.type === "add" ? "+ " : d.type === "remove" ? "- " : "  "}{d.line || d.content}
                     </div>
                   ))}
                 </div>
                 {cfg.status === "pending" && (
                   <div style={{ display: "flex", gap: 8, marginTop: 10 }} onClick={e => e.stopPropagation()}>
-                    <button onClick={() => onConfigAction(cfg.id, "approved", "", cfg.changes)} style={{ flex: 1, padding: 8, borderRadius: 6, fontSize: 11, fontWeight: 700, cursor: "pointer", background: C.green + "18", border: `1px solid ${C.green}44`, color: C.green }}>✓ Approve & Push</button>
-                    <button onClick={() => onConfigAction(cfg.id, "rejected", "", cfg.changes)} style={{ flex: 1, padding: 8, borderRadius: 6, fontSize: 11, fontWeight: 700, cursor: "pointer", background: C.red + "18", border: `1px solid ${C.red}44`, color: C.red }}>✗ Reject</button>
+                    <button onClick={() => onConfigAction(cfg.id, "approved", "", cfg.changes)} style={{ flex: 1, padding: 8, borderRadius: 6, fontSize: FS.validationLabel, fontWeight: 700, cursor: "pointer", background: C.green + "18", border: `1px solid ${C.green}44`, color: C.green }}>✓ Approve & Push</button>
+                    <button onClick={() => onConfigAction(cfg.id, "rejected", "", cfg.changes)} style={{ flex: 1, padding: 8, borderRadius: 6, fontSize: FS.validationLabel, fontWeight: 700, cursor: "pointer", background: C.red + "18", border: `1px solid ${C.red}44`, color: C.red }}>✗ Reject</button>
                   </div>
                 )}
               </div>
@@ -1261,25 +1392,60 @@ function OperationsTab({ state, events, agentRunning, wsStatus, onToggleAgent, o
     </Panel>
   );
 
+  // Pane minimums for drag. Left-column width minimum = MIN.topology.w
+  // because the topology is the widest thing the left column contains
+  // (the bottom-row sub-panes are narrower and can compress into the
+  // same width). Bottom row's min height = max(configProps, alarms+emails)
+  // so dragging the vertical divider can't crush either pane.
+  const leftColMinW   = MIN.topology.w;
+  const topRowMinH    = MIN.topology.h;
+  const bottomRowMinH = Math.max(MIN.configProps.h, MIN.alarms.h + MIN.emails.h);
+  const alarmsColMinW = Math.max(MIN.alarms.w, MIN.emails.w);
+
   return (
     <div style={{ height: "100%", display: "flex", flexDirection: "column", minHeight: 0 }}>
-      <Split direction="horizontal" defaultSizes={[62, 38]}>
+      <Split
+        direction="horizontal"
+        defaultSizes={[62, 38]}
+        minPx={[leftColMinW, MIN.agentLog.w]}
+        storageKey="orca.v2.split.root"
+      >
         {/* LEFT — topology / controls / config+alarms+emails */}
-        <Split direction="vertical" defaultSizes={[44, 12, 44]}>
+        <Split
+          direction="vertical"
+          defaultSizes={[44, 10, 46]}
+          minPx={[topRowMinH, MIN.controlsBar.h, bottomRowMinH]}
+          storageKey="orca.v2.split.left"
+        >
           {/* Top row: topology + right sidebar (status + LSPs) */}
-          <Split direction="horizontal" defaultSizes={[74, 26]}>
+          <Split
+            direction="horizontal"
+            defaultSizes={[74, 26]}
+            minPx={[MIN.topology.w, MIN.lspsSidebar.w]}
+            storageKey="orca.v2.split.top"
+          >
             {TopologyPane}
             {RightSidebarPane}
           </Split>
-          {/* Controls bar — fixed-ish slim row (still inside a Split pane so
-              operator can squeeze it if they want more topology height) */}
+          {/* Controls bar — slim, still inside a Split so operator can
+              collapse it for more topology height if they want */}
           <div style={{ height: "100%", display: "flex", alignItems: "center" }}>
             <ControlsBar onAnalyze={onAnalyze} onAction={onAction} />
           </div>
           {/* Bottom row: proposals on left, alarms+emails on right */}
-          <Split direction="horizontal" defaultSizes={[58, 42]}>
+          <Split
+            direction="horizontal"
+            defaultSizes={[58, 42]}
+            minPx={[MIN.configProps.w, alarmsColMinW]}
+            storageKey="orca.v2.split.bottom"
+          >
             {ConfigProposalsPane}
-            <Split direction="vertical" defaultSizes={[30, 70]}>
+            <Split
+              direction="vertical"
+              defaultSizes={[30, 70]}
+              minPx={[MIN.alarms.h, MIN.emails.h]}
+              storageKey="orca.v2.split.right-stack"
+            >
               {AlarmsPane}
               {EmailsPane}
             </Split>
@@ -1905,8 +2071,8 @@ export default function App() {
         </div>
         <div style={{ display: "flex", gap: 2, background: "rgba(255,255,255,0.02)", borderRadius: 8, padding: 3 }}>
           {TABS.map(tab => (
-            <button key={tab.key} onClick={() => setActiveTab(tab.key)} style={{ padding: "7px 16px", borderRadius: 6, border: "none", background: activeTab === tab.key ? "rgba(6,182,212,0.12)" : "transparent", color: activeTab === tab.key ? C.blue : C.muted, fontSize: 12, fontWeight: 600, cursor: "pointer", transition: "all 0.15s", display: "flex", alignItems: "center", gap: 6 }}>
-              <span style={{ fontSize: 11 }}>{tab.icon}</span>{tab.label}
+            <button key={tab.key} onClick={() => setActiveTab(tab.key)} style={{ padding: "7px 16px", borderRadius: 6, border: "none", background: activeTab === tab.key ? "rgba(6,182,212,0.12)" : "transparent", color: activeTab === tab.key ? C.blue : C.muted, fontSize: FS.tabNav, fontWeight: 700, cursor: "pointer", transition: "all 0.15s", display: "flex", alignItems: "center", gap: 6 }}>
+              <span style={{ fontSize: FS.body }}>{tab.icon}</span>{tab.label}
             </button>
           ))}
         </div>
