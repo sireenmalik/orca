@@ -1851,7 +1851,12 @@ function V2EmailModal({ email, onClose, onSend, onDiscard, onEdit, onSaveDraft }
               lineHeight: 1.65, whiteSpace: "pre-wrap", wordBreak: "break-word",
               fontFamily: "'DM Sans', 'Segoe UI', system-ui, sans-serif",
             }}>
-              {email.body || ""}
+              {(email.body || "").split(/(https?:\/\/[^\s)]+)/g).map((part, i) =>
+                /^https?:\/\//.test(part)
+                  ? <a key={i} href={part} target="_blank" rel="noopener noreferrer"
+                       style={{ color: C.blue, textDecoration: "underline" }}>{part}</a>
+                  : part
+              )}
             </div>
           )}
         </div>

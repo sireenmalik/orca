@@ -261,10 +261,11 @@ def build_act1_email(proposal: dict) -> dict:
 
         f"Proposal {proposal_id} was approved by {approver} at {approve_ts}. "
         f"Deployment completed in 8 seconds via PFCP Session Modification on "
-        f"UPF-01. Config changes committed: see PR {config_pr}"
-        f"{' (#' + str(config_num) + ')' if config_num else ''}. "
-        f"Full incident episode captured: see PR {episode_pr}"
-        f"{' (#' + str(episode_num) + ')' if episode_num else ''}.\n\n"
+        f"UPF-01.\n\n"
+
+        f"GITHUB REFERENCES\n"
+        f"  Config PR{' #' + str(config_num) if config_num else ''}:  {config_pr}\n"
+        f"  Episode PR{' #' + str(episode_num) if episode_num else ''}: {episode_pr}\n\n"
 
         f"VALIDATION RESULTS\n{_validation_table(gates)}\n\n"
 
