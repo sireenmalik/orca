@@ -1,0 +1,48 @@
+# ORCA v2 incident episode — v2-cfg-1777009752185
+# Scenario: slice-a-qos-drift
+
+proposal_id: "v2-cfg-1777009752185"
+triggering_scenario: "slice-a-qos-drift"
+detected_at: "2026-04-24T05:49:12.185535Z"
+approved_at: "2026-04-24T05:49:16.220541Z"
+deployed_at: "2026-04-24T05:49:20.426339Z"
+approver: "operator@session"
+config_pr_url: "https://github.com/sireenmalik/orca/pull/73"
+config_pr_number: 73
+
+diagnosis_summary: |
+  Pre-threshold detection engaged as slice-A p99 N3 latency on UPF-01 climbed from 11.2 ms toward the 15 ms SLA threshold. Session-table audit revealed full skew to UPF-01 (637 sessions vs 0 on UPF-02). QER-table audit revealed enforcement drifted to 32 Mbps vs 50 Mbps committed GBR (-36%). Dual root cause — session skew and QER drift acted in concert. Single-cause fix would not have held.
+
+validation_results:
+  - name: "Syntax"
+    status: "pass"
+    detail: "Valid YAML · PFCP IE structure per TS 29.244 · QER fields well-formed"
+  - name: "Semantic"
+    status: "pass"
+    detail: "UPF-01 and UPF-02 reachable · slice-A QoS profile exists · target session IDs valid"
+  - name: "Mission · utilization"
+    status: "pass"
+    detail: "All N3 links remain < 90% after rebalance · no new transport congestion"
+  - name: "Mission · slice SLA"
+    status: "pass"
+    detail: "slice-A p99 projected 8.9 ms within 15 ms SLA · slice-B unaffected"
+  - name: "Digital twin"
+    status: "pass"
+    detail: "60s simulated traffic · SLA maintained throughout · no new anomalies"
+  - name: "Policy"
+    status: "pass"
+    detail: "QER value in range (1-100 Mbps) · batch size within approved limits"
+
+recovery_metrics:
+  - metric: "slice-A p99 N3 latency"
+    before: "13.1 ms"
+    after: "8.9 ms"
+  - metric: "enterprise at-risk cohort"
+    before: "423 subs"
+    after: "14 subs"
+  - metric: "revenue-at-risk"
+    before: "$1.20M"
+    after: "$40K"
+  - metric: "slice-A SLA headroom"
+    before: "0.1 ms"
+    after: "6.1 ms"
