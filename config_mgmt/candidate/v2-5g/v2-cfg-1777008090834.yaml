@@ -1,0 +1,37 @@
+# ORCA v2 config proposal — v2-cfg-1777008090834
+# Auto-generated on approve. Branch: v2/cfg/slice-a-qos-protection-on-upf-01-20260424-052134
+
+title: "Slice-A QoS protection on UPF-01"
+reason: |
+  Dual root cause on slice-A: (1) load-balancer session skew concentrates the enterprise cohort on UPF-01 with UPF-02 carrying zero slice-A sessions, (2) QER enforcement on UPF-01 priority class has drifted -36% from intent (50 → 32 Mbps GBR). Combined effect: p99 N3 latency climbing 11.2ms → trending toward 15ms SLA breach in ~4 minutes. Single-cause fix will not hold — both changes must ship atomically.
+projected_impact: |
+  slice-A p99 N3 latency returns to 8.9 ms · 842 enterprise subscribers protected · $2.4M ARR cohort recovered
+triggering_incident_id: "slice-a-qos-drift"
+validation_gates:
+  - name: "Syntax"
+    status: "pass"
+    detail: "Valid YAML · PFCP IE structure per TS 29.244 · QER fields well-formed"
+  - name: "Semantic"
+    status: "pass"
+    detail: "UPF-01 and UPF-02 reachable · slice-A QoS profile exists · target session IDs valid"
+  - name: "Mission · utilization"
+    status: "pass"
+    detail: "All N3 links remain < 90% after rebalance · no new transport congestion"
+  - name: "Mission · slice SLA"
+    status: "pass"
+    detail: "slice-A p99 projected 8.9 ms within 15 ms SLA · slice-B unaffected"
+  - name: "Digital twin"
+    status: "pass"
+    detail: "60s simulated traffic · SLA maintained throughout · no new anomalies"
+  - name: "Policy"
+    status: "pass"
+    detail: "QER value in range (1-100 Mbps) · batch size within approved limits"
+diff: |
+  upf: UPF-01
+  qer_profiles:
+    slice-A-priority:
+-     enforced_mbps: 32           # DRIFT -36% from intent
++     enforced_mbps: 50           # restored to intent
++     enforcement_mode: strict
+-     distribution: concentrated_on_upf_01
++     distribution: balanced_upf_01_upf_02
