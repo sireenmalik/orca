@@ -3558,12 +3558,19 @@ function _v1ChurnTabLegacy({ events }) {
 }
 
 // ─── TABS ─────────────────────────────────────────────────────────────────────
+// Security tab hidden from the nav for v2 PM demo — the pitch drops
+// Act 3, and a visible unused tab raises "what's that?" mid-flow. The
+// <SecurityTab/> component, its route handler, and the pre-seeded
+// ALERT in the reasoning log all remain live. Direct access via
+// ?tab=security is preserved for Q&A fallback.
 const TABS = [
-  { key: "ops", label: "Operations", icon: "◉" },
-  { key: "contracts", label: "Contract Stack", icon: "◧" },
-  { key: "security", label: "Security", icon: "◈" },
-  { key: "churn", label: "Churn Forecast", icon: "◎" },
+  { key: "ops",       label: "Operations",      icon: "◉" },
+  { key: "contracts", label: "Contract Stack",  icon: "◧" },
+  { key: "churn",     label: "Churn Forecast",  icon: "◎" },
 ];
+const HIDDEN_TABS = {
+  security: { label: "Security", icon: "◈" },
+};
 
 // ─── MAIN APP ─────────────────────────────────────────────────────────────────
 export default function App() {
@@ -3573,7 +3580,15 @@ export default function App() {
   const [events, setEvents] = useState([PRE_SEEDED_ALERT]);
   const [agentRunning, setAgentRunning] = useState(false);
   const [wsStatus, setWsStatus] = useState("connecting");
-  const [activeTab, setActiveTab] = useState("ops");
+  // Initial tab: ?tab=<key> in the URL wins so hidden tabs (e.g. ?tab=security)
+  // can still be opened directly for Q&A. Falls back to Operations.
+  const [activeTab, setActiveTab] = useState(() => {
+    try {
+      const q = new URLSearchParams(window.location.search).get("tab");
+      if (q) return q;
+    } catch {}
+    return "ops";
+  });
   const [logModalOpen, setLogModalOpen] = useState(false);
   const [emailModal, setEmailModal] = useState(null);
   const [configModal, setConfigModal] = useState(null);
