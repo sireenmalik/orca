@@ -43,30 +43,17 @@ SCENARIOS = {
         "id":                "slice-a-qos-drift",
         "name":              "Slice-A QoS degradation on UPF-01",
         "short_label":       "Act 1 — slice-A QoS",
-        "description":       "Dual root cause: session skew + QER drift. ORCA detects pre-threshold, proposes atomic 2-change package.",
+        "description":       "QER drift on UPF-01 slice-A priority class: enforced 32 Mbps vs committed 50 Mbps GBR. Pre-threshold detect, single atomic fix.",
         "duration_seconds":  45,
         # State evolves from t=0 over ~45s. Each entry is an absolute
         # offset from scenario start (milliseconds). The playback engine
         # schedules them as independent tasks so a high-density state
         # sweep doesn't block the log stream.
         "state_changes": [
-            # Session skew climbing 612 → 637 over 5s (5/sec), then holds.
-            {"at_ms":  200, "target": "sessions.UPF-01.total",                "op": "set", "value": 617},
-            {"at_ms":  200, "target": "sessions.UPF-01.by_slice.slice-A",     "op": "set", "value": 617},
-            {"at_ms":  200, "target": "sessions.UPF-01.by_gnb.gNB-1",         "op": "set", "value": 617},
-            {"at_ms": 1200, "target": "sessions.UPF-01.total",                "op": "set", "value": 622},
-            {"at_ms": 1200, "target": "sessions.UPF-01.by_slice.slice-A",     "op": "set", "value": 622},
-            {"at_ms": 1200, "target": "sessions.UPF-01.by_gnb.gNB-1",         "op": "set", "value": 622},
-            {"at_ms": 2200, "target": "sessions.UPF-01.total",                "op": "set", "value": 627},
-            {"at_ms": 2200, "target": "sessions.UPF-01.by_slice.slice-A",     "op": "set", "value": 627},
-            {"at_ms": 2200, "target": "sessions.UPF-01.by_gnb.gNB-1",         "op": "set", "value": 627},
-            {"at_ms": 3200, "target": "sessions.UPF-01.total",                "op": "set", "value": 632},
-            {"at_ms": 3200, "target": "sessions.UPF-01.by_slice.slice-A",     "op": "set", "value": 632},
-            {"at_ms": 3200, "target": "sessions.UPF-01.by_gnb.gNB-1",         "op": "set", "value": 632},
-            {"at_ms": 4200, "target": "sessions.UPF-01.total",                "op": "set", "value": 637},
-            {"at_ms": 4200, "target": "sessions.UPF-01.by_slice.slice-A",     "op": "set", "value": 637},
-            {"at_ms": 4200, "target": "sessions.UPF-01.by_gnb.gNB-1",         "op": "set", "value": 637},
-            # QER drift flag flips at t=3s
+            # QER drift flag flips at t=3s. Enforced rate has accumulated
+            # drift from successive config pushes and now sits 36% below
+            # committed GBR. No alarm — SLA still green — but slice-A
+            # traffic is being throttled below contract.
             {"at_ms": 3000, "target": "qer_state.UPF-01.slice-A", "op": "set",
              "value": {"intent_gbr_mbps": 50, "enforced_mbps": 32, "status": "drifted"}},
             # p99 latency climb 11 → 13 over 8s starting at t=5s
@@ -90,14 +77,12 @@ SCENARIOS = {
             {"delay_ms": 200,  "type": "detect",   "content": "gNMI telemetry update received from UPF-01. Slice-A p99 N3 latency: 11.2ms → climbing."},
             {"delay_ms": 150,  "type": "detect",   "content": "Trend slope analysis over 90s window: p99 extrapolated breach of 15ms SLA in ~4 minutes."},
             {"delay_ms": 300,  "type": "detect",   "content": "Pre-threshold detection engaged. Initiating diagnosis before SLA breach."},
-            {"delay_ms": 200,  "type": "analyze",  "content": "Checking UPF-01 session distribution for slice-A..."},
-            {"delay_ms": 400,  "type": "analyze",  "content": "Session table: UPF-01 carrying 637 slice-A sessions · UPF-02 carrying 0. Expected distribution: balanced. Observed: full skew to UPF-01."},
-            {"delay_ms": 150,  "type": "analyze",  "content": "Checking UPF-01 QER state for slice-A priority class..."},
-            {"delay_ms": 400,  "type": "analyze",  "content": "QER table: slice-A priority class intent = GBR 50 Mbps · enforced = 32 Mbps. Drift detected: -36% from intent."},
-            {"delay_ms": 200,  "type": "correlate","content": "Correlating: session skew concentrates slice-A load on UPF-01. QER drift under-enforces slice-A priority on that same UPF. Combined effect explains p99 climb."},
+            {"delay_ms": 200,  "type": "analyze",  "content": "Checking UPF-01 QER state for slice-A priority class..."},
+            {"delay_ms": 400,  "type": "analyze",  "content": "QER table: slice-A priority class committed GBR = 50 Mbps. Currently enforced = 32 Mbps. Drift: -36% from intent."},
+            {"delay_ms": 200,  "type": "correlate","content": "Correlating: slice-A packets on UPF-01 throttled below committed rate. Queue buildup at the enforcement point explains p99 climb. Root cause localized."},
             {"delay_ms": 2500, "type": "conclude", "is_conclusion": True,
-             "content": "Diagnosis complete. Dual root cause: load-balancer session skew + QER priority drift. Single-cause fix will not hold."},
-            {"delay_ms": 400,  "type": "decide",   "content": "Composing atomic config package. Change 1: QER update on UPF-01 restoring slice-A GBR to 50 Mbps. Change 2: PFCP session modification, rebalance 180 slice-A high-bandwidth sessions to UPF-02."},
+             "content": "Diagnosis complete. Single root cause: QER drift on UPF-01 slice-A priority class. Current enforcement does not match committed SLA."},
+            {"delay_ms": 400,  "type": "decide",   "content": "Composing config change. QER update on UPF-01 restoring slice-A GBR to 50 Mbps (committed intent). Enforcement mode: strict. One atomic PFCP Session Modification."},
             {"delay_ms": 300,  "type": "decide",   "content": "Running validation gates: syntax ✓ semantic ✓ mission utilization ✓ mission slice SLA ✓ digital twin (60s traffic simulation) ✓ policy ✓"},
             {"delay_ms": 500,  "type": "conclude", "is_conclusion": True,
              "content": "All six validation gates pass. Proposal ready for human approval."},
@@ -166,45 +151,34 @@ SCENARIOS = {
 SCENARIO_PROPOSAL_TEMPLATES = {
     "slice-a-qos-drift": {
         "title": "Slice-A QoS protection on UPF-01",
-        "summary": "Restore QER GBR to 50 Mbps + rebalance 180 sessions to UPF-02",
+        "summary": "Restore QER GBR to 50 Mbps on UPF-01",
         "reason": (
-            "Dual root cause on slice-A: (1) load-balancer session skew concentrates the "
-            "enterprise cohort on UPF-01 with UPF-02 carrying zero slice-A sessions, "
-            "(2) QER enforcement on UPF-01 priority class has drifted -36% from intent "
-            "(50 → 32 Mbps GBR). Combined effect: p99 N3 latency climbing 11.2ms → trending "
-            "toward 15ms SLA breach in ~4 minutes. Single-cause fix will not hold — both "
-            "changes must ship atomically."
+            "QER drift detected on UPF-01 affecting slice-A enterprise cohort (842 accounts, "
+            "$2.4M ARR). Current enforcement for slice-A priority class is 32 Mbps against a "
+            "committed GBR of 50 Mbps — a 36% shortfall accumulated from successive config "
+            "changes. Traffic is being throttled below contract, driving p99 N3 latency toward "
+            "the 15ms SLA threshold. No alarm has fired yet; detection is pre-breach via trend "
+            "slope analysis. Fix is a single atomic QER restoration."
         ),
         "projected_impact": (
-            "slice-A p99 N3 latency returns to 8.9 ms · 842 enterprise subscribers protected · "
-            "$2.4M ARR cohort recovered"
+            "p99 N3 latency returns to 8.9ms · 842 enterprise accounts protected · "
+            "$2.4M ARR cohort preserved"
         ),
         "devices": [
-            {"id": "UPF-01", "note": None,                       "label": "UPF-01 · qer_change"},
-            {"id": "UPF-02", "note": None,                       "label": "UPF-02 · session_accept"},
+            {"id": "UPF-01", "note": "qer_change", "label": "UPF-01 · qer_change"},
         ],
         "device_diffs": {
             "UPF-01": [
                 {"type": "context", "line": "upf: UPF-01"},
                 {"type": "context", "line": "qer_profiles:"},
                 {"type": "context", "line": "  slice-A-priority:"},
-                {"type": "remove",  "line": "    enforced_mbps: 32           # DRIFT -36% from intent"},
-                {"type": "add",     "line": "    enforced_mbps: 50           # restored to intent"},
-                {"type": "context", "line": "    intent_gbr_mbps: 50"},
-                {"type": "add",     "line": "    enforcement_mode: strict"},
-                {"type": "context", "line": "pfcp_sessions:"},
-                {"type": "context", "line": "  slice-A:"},
-                {"type": "remove",  "line": "    distribution: concentrated_on_upf_01"},
-                {"type": "add",     "line": "    distribution: balanced_upf_01_upf_02"},
-            ],
-            "UPF-02": [
-                {"type": "context", "line": "upf: UPF-02"},
-                {"type": "context", "line": "pfcp_sessions:"},
-                {"type": "context", "line": "  slice-A:"},
-                {"type": "add",     "line": "    incoming_migration_accept: true"},
-                {"type": "add",     "line": "    f_teid_pool: alt_pool_02"},
-                {"type": "add",     "line": "    batch_size_per_second: 30"},
-                {"type": "add",     "line": "    expected_incoming: 180"},
+                {"type": "context", "line": "    intent_gbr_mbps: 50           # committed SLA"},
+                {"type": "remove",  "line": "    enforced_mbps: 32             # DRIFT -36% from intent"},
+                {"type": "add",     "line": "    enforced_mbps: 50             # restored to intent"},
+                {"type": "add",     "line": "    enforcement_mode: strict      # hard guarantee"},
+                {"type": "context", "line": "    mbr_downlink: 100"},
+                {"type": "context", "line": "    mbr_uplink: 100"},
+                {"type": "context", "line": "    priority_level: 3"},
             ],
         },
         "device_configs": {
@@ -212,21 +186,12 @@ SCENARIO_PROPOSAL_TEMPLATES = {
                 "upf: UPF-01\n"
                 "qer_profiles:\n"
                 "  slice-A-priority:\n"
-                "    enforced_mbps: 50           # restored to intent\n"
-                "    intent_gbr_mbps: 50\n"
-                "    enforcement_mode: strict\n"
-                "pfcp_sessions:\n"
-                "  slice-A:\n"
-                "    distribution: balanced_upf_01_upf_02\n"
-            ),
-            "UPF-02": (
-                "upf: UPF-02\n"
-                "pfcp_sessions:\n"
-                "  slice-A:\n"
-                "    incoming_migration_accept: true\n"
-                "    f_teid_pool: alt_pool_02\n"
-                "    batch_size_per_second: 30\n"
-                "    expected_incoming: 180\n"
+                "    intent_gbr_mbps: 50           # committed SLA\n"
+                "    enforced_mbps: 50             # restored to intent\n"
+                "    enforcement_mode: strict      # hard guarantee\n"
+                "    mbr_downlink: 100\n"
+                "    mbr_uplink: 100\n"
+                "    priority_level: 3\n"
             ),
         },
         # Flat diff retained for the compact card preview (it uses .slice(0,8)).
@@ -234,25 +199,24 @@ SCENARIO_PROPOSAL_TEMPLATES = {
             {"type": "context", "line": "upf: UPF-01"},
             {"type": "context", "line": "qer_profiles:"},
             {"type": "context", "line": "  slice-A-priority:"},
-            {"type": "remove",  "line": "    enforced_mbps: 32           # DRIFT -36% from intent"},
-            {"type": "add",     "line": "    enforced_mbps: 50           # restored to intent"},
-            {"type": "add",     "line": "    enforcement_mode: strict"},
-            {"type": "remove",  "line": "    distribution: concentrated_on_upf_01"},
-            {"type": "add",     "line": "    distribution: balanced_upf_01_upf_02"},
+            {"type": "context", "line": "    intent_gbr_mbps: 50           # committed SLA"},
+            {"type": "remove",  "line": "    enforced_mbps: 32             # DRIFT -36% from intent"},
+            {"type": "add",     "line": "    enforced_mbps: 50             # restored to intent"},
+            {"type": "add",     "line": "    enforcement_mode: strict      # hard guarantee"},
         ],
         "validation_gates": [
             {"name": "Syntax",                "status": "pass",
-             "detail": "Valid YAML · PFCP IE structure per TS 29.244 · QER fields well-formed"},
+             "detail": "Valid YAML · QER IE structure per TS 29.244 · fields well-formed"},
             {"name": "Semantic",              "status": "pass",
-             "detail": "UPF-01 and UPF-02 reachable · slice-A QoS profile exists · target session IDs valid"},
+             "detail": "UPF-01 reachable · slice-A QoS profile exists · QCI-to-QoS mapping valid"},
             {"name": "Mission · utilization", "status": "pass",
-             "detail": "All N3 links remain < 90% after rebalance · no new transport congestion"},
+             "detail": "No transport impact · all N3 links remain < 90%"},
             {"name": "Mission · slice SLA",   "status": "pass",
-             "detail": "slice-A p99 projected 8.9 ms within 15 ms SLA · slice-B unaffected"},
+             "detail": "slice-A p99 projected to return to 8.9ms within 15ms SLA · slice-B unaffected"},
             {"name": "Digital twin",          "status": "pass",
-             "detail": "60s simulated traffic · SLA maintained throughout · no new anomalies"},
+             "detail": "60s simulated traffic with corrected QER · SLA maintained throughout · no new anomalies"},
             {"name": "Policy",                "status": "pass",
-             "detail": "QER value in range (1-100 Mbps) · batch size within approved limits"},
+             "detail": "QER value 50 Mbps within operator-approved range (1-100 Mbps)"},
         ],
         "triggering_incident_id": "slice-a-qos-drift",
     },
@@ -329,9 +293,8 @@ SCENARIO_PROPOSAL_TEMPLATES = {
 # deploy simulation. Rendered with type="recovered" for green styling.
 SCENARIO_RECOVERY_ENTRIES = {
     "slice-a-qos-drift": [
-        {"delay_ms": 200, "content": "QER update on UPF-01 committed · slice-A priority class now enforcing GBR 50 Mbps"},
-        {"delay_ms": 300, "content": "PFCP session modification batch complete · 180 slice-A sessions re-anchored to UPF-02 over 6.2 seconds · user-plane continuity preserved"},
-        {"delay_ms": 400, "content": "Slice-A p99 N3 latency recovered: 13.1 ms → 8.9 ms · SLA headroom restored"},
+        {"delay_ms": 200, "content": "QER update on UPF-01 committed · slice-A priority class now enforcing GBR 50 Mbps · strict mode active"},
+        {"delay_ms": 400, "content": "Slice-A p99 N3 latency recovered: 13.1ms → 8.9ms · SLA headroom restored"},
     ],
     "transport-congestion-upf-innocent": [
         # Note: the old "TAC email dispatched" line used to live here

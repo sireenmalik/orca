@@ -95,22 +95,20 @@ def discard(email_id: str) -> bool:
 def build_act1_early_email(proposal: dict) -> dict:
     proposal_id = proposal.get("id", "(unknown)")
     body = (
-        "At " + datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC") + ", ORCA completed "
-        "diagnosis of a dual root cause condition on UPF-01 affecting the slice-A "
-        "enterprise cohort (842 subscribers, $2.4M ARR). Session distribution skew "
-        "had concentrated all active slice-A sessions on UPF-01 while QER enforcement "
-        "had drifted from committed intent (32 Mbps enforced vs 50 Mbps GBR). p99 N3 "
-        "latency was trending toward the 15 ms SLA threshold.\n\n"
+        "At " + datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC") + ", ORCA detected "
+        "QER drift on UPF-01 affecting the slice-A enterprise cohort (842 accounts, "
+        "$2.4M ARR). Slice-A priority class is currently enforcing 32 Mbps against "
+        "a committed GBR of 50 Mbps — a 36% shortfall accumulated from successive "
+        "config changes. p99 N3 latency is trending toward the 15 ms SLA threshold.\n\n"
 
-        "ORCA is proposing an atomic two-change configuration package: (1) QER update "
-        "on UPF-01 restoring slice-A priority class to committed GBR of 50 Mbps, and "
-        "(2) PFCP session modification rebalancing 180 high-bandwidth slice-A sessions "
-        "to UPF-02. All six validation gates (syntax, semantic, mission utilization, "
-        "mission slice SLA, digital twin, policy) have passed.\n\n"
+        "ORCA is proposing a single-change restoration: QER update on UPF-01 "
+        "bringing slice-A priority class back to committed 50 Mbps GBR with strict "
+        "enforcement mode. All six validation gates (syntax, semantic, mission "
+        "utilization, mission slice SLA, digital twin, policy) have passed.\n\n"
 
-        f"Proposal {proposal_id} is currently PENDING human approval. No action has "
-        "been taken on the network yet. This notification is for awareness; the "
-        "resolution email will follow upon deployment.\n\n"
+        f"Proposal {proposal_id} is currently PENDING human approval. No action "
+        "has been taken on the network yet. This notification is for awareness; "
+        "the resolution email will follow upon deployment.\n\n"
 
         "— ORCA"
     )
@@ -121,46 +119,6 @@ def build_act1_early_email(proposal: dict) -> dict:
         "cc":                     ["slice-ops@operator.example.com"],
         "from":                   FROM_ADDRESS,
         "subject":                "ORCA diagnosis — Slice-A QoS degradation on UPF-01, proposal pending approval",
-        "body":                   body,
-        "attachments":            [],
-        "status":                 "sent",
-        "triggering_proposal_id": proposal_id,
-    }
-
-
-def build_act2_early_email(proposal: dict) -> dict:
-    proposal_id = proposal.get("id", "(unknown)")
-    body = (
-        "At " + datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC") + ", ORCA completed "
-        "diagnosis of slice-A p99 N3 latency climbing on UPF-01 toward the 15 ms SLA "
-        "threshold. After systematically clearing Nokia core elements — UPF-01 CPU, "
-        "memory, PFCP association, QER state, SMF keepalive, AMF session count — ORCA "
-        "pivoted to transport telemetry and identified the root cause: 93% utilization "
-        "with microbursts on the PE-01 ↔ P-02 link carrying LSP-1. Nokia core is not "
-        "the cause.\n\n"
-
-        "ORCA is proposing two parallel responses: (1) Nokia-domain workaround — PFCP "
-        "session modification re-anchoring 180 slice-A high-bandwidth sessions via an "
-        "alternate path that bypasses the congested segment; (2) this TAC handoff — "
-        "notifying the operator's transport team with the evidence package and three "
-        "suggested transport-side resolutions (short-term reroute, medium-term IGP "
-        "rebalance, long-term capacity augment). All six validation gates passed on "
-        "the Nokia-domain workaround.\n\n"
-
-        f"Proposal {proposal_id} is currently PENDING human approval. The Nokia "
-        "workaround will deploy on approval; the transport-side decision remains with "
-        "the transport team. A detailed resolution email with both PR links will follow "
-        "upon Nokia-domain deployment.\n\n"
-
-        "— ORCA (on behalf of Nokia NetOps)"
-    )
-    return {
-        "type":                   "external_tac",
-        "tag":                    "early_notification",
-        "to":                     ["transport-tac@operator.example.com"],
-        "cc":                     ["network-ops@operator.example.com"],
-        "from":                   FROM_ADDRESS,
-        "subject":                "ORCA diagnosis — Transport congestion on PE-01 ↔ P-02, Nokia core cleared, workaround pending approval",
         "body":                   body,
         "attachments":            [],
         "status":                 "sent",
@@ -220,7 +178,7 @@ def build_act2_tac_handoff(scenario_id: str = "transport-congestion-upf-innocent
         "  1. Short-term — reroute LSP-1 via P-01 → P-02 alternate path. "
         "IGP metric adjustment on PE-01 to prefer the alternate. Estimated "
         "deployment time: 5 minutes. No capex.\n"
-        "  2. Medium-term — rebalance traffic across PE-01 ↔ P-02 and "
+        "  2. Medium-term — redistribute traffic across PE-01 ↔ P-02 and "
         "PE-01 ↔ P-01 by adjusting IGP metrics. Sustained improvement without "
         "capacity addition. Estimated deployment: 30 minutes.\n"
         "  3. Long-term — capacity augment on PE-01 ↔ P-02. 40G → 100G "
@@ -290,35 +248,31 @@ def build_act1_email(proposal: dict) -> dict:
     gates       = proposal.get("validation_gates") or []
 
     body = (
-        f"At {ts_detected}, ORCA detected a dual root cause condition on UPF-01 "
-        f"affecting the slice-A enterprise cohort (842 subscribers, $2.4M ARR). "
-        f"Session distribution skew had concentrated all active slice-A sessions "
-        f"on UPF-01 while QER enforcement had drifted from committed intent "
-        f"(32 Mbps enforced vs 50 Mbps GBR). Combined effect was driving p99 N3 "
-        f"latency toward the 15 ms SLA threshold.\n\n"
+        f"At {ts_detected}, ORCA detected QER drift on UPF-01 affecting the "
+        f"slice-A enterprise cohort (842 accounts, $2.4M ARR). Slice-A priority "
+        f"class was enforcing 32 Mbps against a committed GBR of 50 Mbps — a 36% "
+        f"shortfall. p99 N3 latency was climbing toward the 15 ms SLA threshold, "
+        f"with projected breach in approximately 4 minutes.\n\n"
 
-        f"ORCA composed an atomic two-change configuration package: (1) QER "
-        f"update on UPF-01 restoring slice-A priority class to committed GBR "
-        f"of 50 Mbps, and (2) PFCP session modification to rebalance 180 "
-        f"high-bandwidth slice-A sessions to UPF-02.\n\n"
+        f"ORCA composed a single-change restoration: QER update on UPF-01 "
+        f"restoring slice-A priority class to the committed GBR of 50 Mbps with "
+        f"strict enforcement mode. All six validation gates passed including "
+        f"60-second digital twin simulation.\n\n"
 
         f"Proposal {proposal_id} was approved by {approver} at {approve_ts}. "
-        f"Deployment completed in 8 seconds. Config changes committed: see "
-        f"PR {config_pr}{' (#' + str(config_num) + ')' if config_num else ''}. "
+        f"Deployment completed in 8 seconds via PFCP Session Modification on "
+        f"UPF-01. Config changes committed: see PR {config_pr}"
+        f"{' (#' + str(config_num) + ')' if config_num else ''}. "
         f"Full incident episode captured: see PR {episode_pr}"
         f"{' (#' + str(episode_num) + ')' if episode_num else ''}.\n\n"
 
         f"VALIDATION RESULTS\n{_validation_table(gates)}\n\n"
 
-        f"RECOVERY METRICS\n"
-        f"  slice-A p99 N3 latency    13.1 ms  →  8.9 ms\n"
-        f"  enterprise at-risk cohort    423   →    14   subscribers\n"
-        f"  revenue-at-risk          $1.20M   →  $40K   (−$1.16M)\n"
-        f"  slice-A SLA headroom      0.1 ms  →  6.1 ms\n\n"
-
-        f"No further action required. Intervention landed pre-breach — no "
-        f"customer-facing impact occurred. Digital twin state updated. Episode "
-        f"captured for learned policy review.\n\n"
+        f"Post-recovery measurements: slice-A p99 N3 latency recovered from "
+        f"13.1 ms to 8.9 ms. Enterprise at-risk cohort reduced from 423 to 14 "
+        f"subscribers. Revenue-at-risk reduced by $1.16M. Slice-A SLA headroom "
+        f"fully restored. No customer-facing impact occurred — intervention "
+        f"landed pre-breach.\n\n"
 
         f"— ORCA"
     )
@@ -338,99 +292,6 @@ def build_act1_email(proposal: dict) -> dict:
              "size_bytes": 14382, "mime_type": "application/json", "content_reference": "internal"},
             {"filename": "upf-01-qer-before-after.yaml",
              "size_bytes": 2108,  "mime_type": "application/yaml", "content_reference": "internal"},
-        ],
-        "triggering_proposal_id": proposal_id,
-    }
-
-
-def build_act2_email(proposal: dict) -> dict:
-    config_pr   = proposal.get("pr_url") or "(config PR pending)"
-    config_num  = proposal.get("pr_number")
-    episode_pr  = proposal.get("episode_pr_url") or "(episode PR pending)"
-    episode_num = proposal.get("episode_pr_number")
-    proposal_id = proposal.get("id", "(unknown)")
-    approver    = proposal.get("approver") or OPERATOR_PLACEHOLDER
-    approve_ts  = proposal.get("approved_at") or _now_iso()
-    gates       = proposal.get("validation_gates") or []
-    otdr_ts = (datetime.utcnow()
-               .replace(hour=max(0, datetime.utcnow().hour - 9),
-                        minute=17, second=0, microsecond=0)
-               .strftime("%Y-%m-%d %H:%M:%S UTC"))
-
-    body = (
-        "ORCA detected transport-layer congestion on the PE-01 ↔ P-02 link "
-        "affecting LSP-1, which carries slice-A enterprise traffic from gNB-1 "
-        "to UPF-01. Link utilization reached 93% with microbursts detected in "
-        "the last 60 seconds. Combined effect was driving p99 N3 latency on "
-        "UPF-01 toward the 15 ms slice-A SLA threshold.\n\n"
-
-        "Nokia core elements cleared as root cause. UPF-01 CPU, memory "
-        "pressure, PFCP association state, and QER enforcement all healthy. "
-        "SMF keepalive and AMF session count nominal. Core signaling plane "
-        "clean. The fault is upstream of UPF-01, on the transport path.\n\n"
-
-        f"Proposal {proposal_id} was approved by {approver} at {approve_ts}. "
-        f"ORCA deployed a Nokia-domain workaround: PFCP session modification "
-        f"re-anchoring 180 slice-A high-bandwidth sessions via an alternate "
-        f"path bypassing the congested PE-01 ↔ P-02 segment. Config changes "
-        f"committed: see PR {config_pr}"
-        f"{' (#' + str(config_num) + ')' if config_num else ''}. "
-        f"Full incident episode captured: see PR {episode_pr}"
-        f"{' (#' + str(episode_num) + ')' if episode_num else ''}.\n\n"
-
-        f"VALIDATION RESULTS\n{_validation_table(gates)}\n\n"
-
-        f"RECOVERY METRICS\n"
-        f"  slice-A p99 N3 latency    14.0 ms  →  9.1 ms   (via alternate path)\n"
-        f"  LSP-1 utilization           93%    →   93%     (unchanged — upstream)\n"
-        f"  alternate path util         24%    →   61%     (absorbed migration)\n"
-        f"  Nokia core impact          contained — zero customer-facing degradation\n\n"
-
-        f"Evidence package attached: 60-second telemetry window showing link "
-        f"utilization, LSP-1 path state, and slice-A N3 latency correlation. "
-        f"OTDR last clean reading: {otdr_ts}. Current link status: congested, "
-        f"no physical fault indicators.\n\n"
-
-        "Suggested resolutions for transport team evaluation:\n"
-        "  1. Short-term — reroute LSP-1 via P-01 → P-02 alternate path. "
-        "IGP metric adjustment on PE-01 to prefer the alternate. Estimated "
-        "deployment time: 5 minutes. No capex.\n"
-        "  2. Medium-term — rebalance traffic across PE-01 ↔ P-02 and "
-        "PE-01 ↔ P-01 by adjusting IGP metrics. Sustained improvement without "
-        "capacity addition. Estimated deployment: 30 minutes.\n"
-        "  3. Long-term — capacity augment on PE-01 ↔ P-02. 40G → 100G "
-        "upgrade. Estimated capex: $180K. Justification: trend analysis shows "
-        "this link approaching 80% average utilization over 30 days, "
-        "congestion episodes increasing in frequency.\n\n"
-
-        "Please advise on preferred resolution path. ORCA's workaround will "
-        "remain in place until the transport congestion is resolved at source. "
-        "Reversion plan is pre-staged — see attached rollback spec.\n\n"
-
-        "Contact: orca@noc.operator.example.com for further evidence or "
-        "telemetry queries.\n\n"
-
-        "— ORCA (on behalf of Nokia NetOps)"
-    )
-
-    ts_filename = datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
-    return {
-        "type":                   "external_tac",
-        "tag":                    "post_deploy_resolution",
-        "to":                     ["transport-tac@operator.example.com"],
-        "cc":                     ["network-ops@operator.example.com"],
-        "from":                   FROM_ADDRESS,
-        "subject":                "Transport congestion on PE-01 ↔ P-02 — slice-A enterprise impact, Nokia core cleared",
-        "body":                   body,
-        "attachments": [
-            {"filename": f"transport-congestion-evidence-{ts_filename}.json",
-             "size_bytes": 24816, "mime_type": "application/json", "content_reference": "internal"},
-            {"filename": "lsp-1-path-state-60s-window.json",
-             "size_bytes": 9422,  "mime_type": "application/json", "content_reference": "internal"},
-            {"filename": "slice-a-n3-latency-correlation.csv",
-             "size_bytes": 4218,  "mime_type": "text/csv",         "content_reference": "internal"},
-            {"filename": "workaround-rollback-spec.yaml",
-             "size_bytes": 1840,  "mime_type": "application/yaml", "content_reference": "internal"},
         ],
         "triggering_proposal_id": proposal_id,
     }

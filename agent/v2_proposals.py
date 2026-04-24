@@ -178,11 +178,11 @@ EPISODE_RECOVERY_METRICS = {
 EPISODE_DIAGNOSIS_SUMMARY = {
     "slice-a-qos-drift": (
         "Pre-threshold detection engaged as slice-A p99 N3 latency on UPF-01 "
-        "climbed from 11.2 ms toward the 15 ms SLA threshold. Session-table "
-        "audit revealed full skew to UPF-01 (637 sessions vs 0 on UPF-02). "
-        "QER-table audit revealed enforcement drifted to 32 Mbps vs 50 Mbps "
-        "committed GBR (-36%). Dual root cause — session skew and QER drift "
-        "acted in concert. Single-cause fix would not have held."
+        "climbed from 11.2 ms toward the 15 ms SLA threshold. QER-table audit "
+        "revealed enforcement on the slice-A priority class drifted to 32 Mbps "
+        "vs 50 Mbps committed GBR (-36%), accumulated from successive config "
+        "changes. Single root cause localized. Fix: one atomic QER restoration "
+        "bringing enforcement back to committed intent with strict mode."
     ),
     "transport-congestion-upf-innocent": (
         "Slice-A p99 N3 latency climbing on UPF-01. UPF-01 local resources "

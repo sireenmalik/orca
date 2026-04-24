@@ -192,7 +192,7 @@ class ContainerlabAdapter(NetworkAdapter):
             "total": 612,
             "by_slice": {"slice-A": 612, "slice-B": 0},
             "by_gnb":   {"gNB-1": 612,   "gNB-2": 0},
-            "high_bw_sessions": 180,  # priority-class count, used by PFCP rebalance demo
+            "high_bw_sessions": 180,  # slice-A priority-class session count
         },
         "UPF-02": {
             "total": 8243,
@@ -252,7 +252,7 @@ class ContainerlabAdapter(NetworkAdapter):
         # Churn: LSP utilization history (96 slots = 24h at 15min intervals)
         self._lsp_history: dict = {lsp_id: [] for lsp_id in self.LSP_DEFAULTS}
         self._history_tick = 0
-        # 5G slice + session state (mutable — reroute/rebalance updates these)
+        # 5G slice + session state (mutable — scenario patches update these)
         self._slices = {sid: dict(s) for sid, s in self.SLICES.items()}
         self._sessions = {
             upf: {
