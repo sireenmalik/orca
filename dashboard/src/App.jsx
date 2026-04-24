@@ -1243,11 +1243,222 @@ function EmailCard({ email: e, onEdit }) {
   );
 }
 
+// ─── V2 CONFIG PROPOSAL CARD ──────────────────────────────────────────────────
+// Full-fidelity proposal card for the 5G demo. Backed by /api/proposals
+// (see agent/v2_proposals.py). Renders: header + status badge + timestamp,
+// reason block, projected impact, six validation gate chips with hover
+// tooltips, unified diff preview, and action buttons. Pulses briefly on
+// status transition so the presenter's eye is drawn to the change.
+const STATUS_STYLE = {
+  pending:   { label: "PENDING",   fg: C.yellow, border: C.yellow },
+  approved:  { label: "APPROVED",  fg: C.green,  border: C.green  },
+  deploying: { label: "DEPLOYING", fg: C.blue,   border: C.blue   },
+  deployed:  { label: "DEPLOYED",  fg: C.blue,   border: C.blue   },
+  rejected:  { label: "REJECTED",  fg: C.red,    border: C.red    },
+};
+const GATE_COLOR = {
+  pass:    { bg: C.green + "18", fg: C.green,  icon: "✓" },
+  fail:    { bg: C.red + "18",   fg: C.red,    icon: "✗" },
+  pending: { bg: "#eab30818",    fg: C.yellow, icon: "•" },
+};
+
+function V2ProposalCard({ p, isPulsing, isDeploying, onApprove, onReject }) {
+  const status = STATUS_STYLE[p.status] || STATUS_STYLE.pending;
+  const gates  = p.validation_gates || [];
+  const allPass = gates.length > 0 && gates.every(g => g.status === "pass");
+  const canApprove = p.status === "pending" && allPass && !isDeploying;
+  const approveTooltip = !allPass ? "Cannot deploy — one or more validation gates failed" : "";
+  const ts = (() => {
+    try { return new Date(p.created_at).toLocaleTimeString(); } catch { return ""; }
+  })();
+
+  // Subtle shadow on pending to draw attention; removed once decided.
+  const shadow = p.status === "pending" ? "0 4px 16px rgba(234,179,8,0.12)" : "none";
+  // Pulse ring — animates once per status transition (see keyframes in GlobalStyles).
+  const pulseStyle = isPulsing ? { animation: "orcaPulse 800ms ease-out" } : {};
+
+  return (
+    <div style={{
+      background: "rgba(255,255,255,0.02)",
+      border: `1px solid ${C.border}`,
+      borderLeft: `3px solid ${status.border}`,
+      borderRadius: 8,
+      padding: 14,
+      marginBottom: 12,
+      boxShadow: shadow,
+      ...pulseStyle,
+    }}>
+      {/* Header */}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start", gap: 10, marginBottom: 10 }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: FS.proposalTitle, fontWeight: 700, color: C.text, wordBreak: "break-word", lineHeight: 1.3 }}>
+            {p.title}
+          </div>
+          <div style={{ fontSize: FS.logTimestamp, color: C.muted, fontFamily: "monospace", marginTop: 3 }}>
+            {p.id} · generated {ts}
+            {p.pr_url && (
+              <> · <a href={p.pr_url} target="_blank" rel="noreferrer" style={{ color: C.blue, textDecoration: "none" }}>PR #{p.pr_number}</a></>
+            )}
+          </div>
+        </div>
+        <span style={{
+          fontSize: FS.logBadge,
+          fontWeight: 700,
+          padding: "3px 10px",
+          borderRadius: 4,
+          background: status.fg + "18",
+          color: status.fg,
+          fontFamily: "monospace",
+          flexShrink: 0,
+          letterSpacing: 0.5,
+        }}>{status.label}</span>
+      </div>
+
+      {/* Reason */}
+      <div style={{ marginBottom: 10 }}>
+        <div style={{ fontSize: FS.logBadge, color: C.muted, letterSpacing: 1, textTransform: "uppercase", marginBottom: 3 }}>
+          Reason
+        </div>
+        <div style={{ fontSize: FS.proposalReason, color: C.text, lineHeight: 1.5, wordBreak: "break-word" }}>
+          {p.reason || "—"}
+        </div>
+      </div>
+
+      {/* Projected impact */}
+      {p.projected_impact && (
+        <div style={{ marginBottom: 10 }}>
+          <div style={{ fontSize: FS.logBadge, color: C.muted, letterSpacing: 1, textTransform: "uppercase", marginBottom: 3 }}>
+            Projected impact
+          </div>
+          <div style={{ fontSize: FS.proposalReason, color: C.green, lineHeight: 1.5, wordBreak: "break-word", fontFamily: "monospace" }}>
+            {p.projected_impact}
+          </div>
+        </div>
+      )}
+
+      {/* Validation gates */}
+      {gates.length > 0 && (
+        <div style={{ display: "flex", gap: 5, flexWrap: "wrap", marginBottom: 10 }}>
+          {gates.map(g => {
+            const col = GATE_COLOR[g.status] || GATE_COLOR.pending;
+            return (
+              <span
+                key={g.name}
+                title={g.detail || ""}
+                style={{
+                  fontSize: FS.validationLabel,
+                  fontWeight: 700,
+                  padding: "3px 8px",
+                  borderRadius: 3,
+                  background: col.bg,
+                  color: col.fg,
+                  fontFamily: "monospace",
+                  cursor: "help",
+                }}
+              >
+                {col.icon} {g.name}
+              </span>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Diff */}
+      {(p.diff || []).length > 0 && (
+        <div style={{
+          background: "#0d1117",
+          border: `1px solid ${C.border}`,
+          borderRadius: 6,
+          padding: 8,
+          fontFamily: "monospace",
+          fontSize: FS.diff,
+          lineHeight: 1.65,
+          maxHeight: 250,
+          overflow: "auto",
+          marginBottom: 10,
+        }}>
+          {p.diff.map((d, i) => (
+            <div key={i} style={{
+              padding: "1px 8px",
+              background: d.type === "add"   ? "rgba(16,185,129,0.08)"
+                        : d.type === "remove" ? "rgba(239,68,68,0.08)"
+                        : "transparent",
+              color: d.type === "add"    ? C.green
+                   : d.type === "remove" ? C.red
+                   : C.muted,
+              whiteSpace: "pre",
+            }}>
+              {d.type === "add" ? "+ " : d.type === "remove" ? "- " : "  "}{d.line}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Action buttons */}
+      {p.status === "pending" && (
+        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <button
+            onClick={onApprove}
+            disabled={!canApprove}
+            title={approveTooltip}
+            style={{
+              flex: 1,
+              padding: "10px 14px",
+              borderRadius: 6,
+              fontSize: FS.proposalReason,
+              fontWeight: 700,
+              cursor: canApprove ? "pointer" : "not-allowed",
+              background: canApprove ? C.green + "22" : "rgba(255,255,255,0.03)",
+              border: `1px solid ${canApprove ? C.green : C.border}`,
+              color: canApprove ? C.green : C.muted,
+              opacity: canApprove ? 1 : 0.6,
+            }}
+          >
+            {isDeploying ? "⚙️ Deploying..." : "✓ Approve & Deploy"}
+          </button>
+          <button
+            onClick={onReject}
+            disabled={isDeploying}
+            style={{
+              padding: "10px 14px",
+              borderRadius: 6,
+              fontSize: FS.proposalReason,
+              fontWeight: 600,
+              cursor: isDeploying ? "not-allowed" : "pointer",
+              background: "transparent",
+              border: `1px solid ${C.red}66`,
+              color: C.red,
+            }}
+          >Reject</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Single <style> tag with keyframes. Mounted once — cheap, no Vite CSS step.
+function GlobalStyles() {
+  return (
+    <style>{`
+      @keyframes orcaPulse {
+        0%   { box-shadow: 0 0 0 0    rgba(6, 182, 212, 0.55); }
+        50%  { box-shadow: 0 0 0 10px rgba(6, 182, 212, 0.18); }
+        100% { box-shadow: 0 0 0 0    rgba(6, 182, 212, 0);    }
+      }
+    `}</style>
+  );
+}
+
 // ─── OPERATIONS TAB ──────────────────────────────────────────────────────────
 function OperationsTab({ state, events, agentRunning, wsStatus, onToggleAgent, onAnalyze, onAction, onConfigAction, onEmailSend, logModalOpen, setLogModalOpen, emailModal, setEmailModal, configModal, setConfigModal }) {
-  const [proposals, setProposals] = useState([]);
+  const [proposals, setProposals] = useState([]);       // v1 store, kept for baseline
+  const [v2Proposals, setV2Proposals] = useState([]);   // v2 demo chassis — the panel renders these
   const [emails, setEmails] = useState([]);
   const [notifications, setNotifications] = useState([]);
+  // Track which v2 proposal card just transitioned so we can pulse it.
+  const [pulseId, setPulseId] = useState(null);
+  const prevStatusRef = useRef({});
+  const [deployingIds, setDeployingIds] = useState(new Set());
 
   useEffect(() => {
     const poll = async () => {
@@ -1261,6 +1472,48 @@ function OperationsTab({ state, events, agentRunning, wsStatus, onToggleAgent, o
     const t = setInterval(poll, 5000);
     return () => clearInterval(t);
   }, []);
+
+  // v2 proposals — poll + refresh on PR/status WebSocket events
+  const fetchV2 = useCallback(async () => {
+    try {
+      const r = await fetch(`${API}/api/proposals`);
+      const d = await r.json();
+      setV2Proposals(d.proposals || []);
+    } catch {}
+  }, []);
+  useEffect(() => {
+    fetchV2();
+    const t = setInterval(fetchV2, 3000);
+    return () => clearInterval(t);
+  }, [fetchV2]);
+  // Proposal-related WebSocket events also trigger an immediate refetch so
+  // the UI doesn't lag behind a 3s poll.
+  useEffect(() => {
+    const last = events[events.length - 1];
+    if (!last) return;
+    const status = last?.data?.status;
+    if (last.type === "pr_opened"
+        || ["proposal_created", "proposal_approved", "proposal_rejected", "deploying", "deployed"].includes(status)) {
+      fetchV2();
+    }
+  }, [events, fetchV2]);
+
+  // Pulse card when its status changes (pending→approved→deployed etc).
+  useEffect(() => {
+    const prev = prevStatusRef.current;
+    const next = {};
+    const transitioned = [];
+    for (const p of v2Proposals) {
+      next[p.id] = p.status;
+      if (prev[p.id] && prev[p.id] !== p.status) transitioned.push(p.id);
+    }
+    prevStatusRef.current = next;
+    if (transitioned.length) {
+      setPulseId(transitioned[0]);
+      const t = setTimeout(() => setPulseId(null), 900);
+      return () => clearTimeout(t);
+    }
+  }, [v2Proposals]);
 
   useEffect(() => {
     const poll = async () => {
@@ -1350,41 +1603,47 @@ function OperationsTab({ state, events, agentRunning, wsStatus, onToggleAgent, o
     </Panel>
   );
 
+  // v2 demo: approve / reject handlers for the new workflow chassis.
+  // They hit /api/proposals/{id}/{approve|reject} and optimistically mark
+  // the card as deploying so the button spinner state is visible even
+  // before the server round-trips.
+  const v2Approve = async (id) => {
+    setDeployingIds(s => new Set([...s, id]));
+    try {
+      await fetch(`${API}/api/proposals/${id}/approve`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: "{}",
+      });
+    } catch {}
+    // Refetch after a bit — the deploy sim is ~1.5s server-side.
+    setTimeout(fetchV2, 2200);
+    setTimeout(() => setDeployingIds(s => { const n = new Set(s); n.delete(id); return n; }), 2500);
+  };
+  const v2Reject = async (id) => {
+    try {
+      await fetch(`${API}/api/proposals/${id}/reject`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: "{}",
+      });
+    } catch {}
+    fetchV2();
+  };
+
+  const v2PendingCount = v2Proposals.filter(p => p.status === "pending").length;
   const ConfigProposalsPane = (
-    <Panel title="Config Proposals" badge={pendingProposals} style={{ height: "100%", minHeight: 0 }}>
-            {proposals.length === 0 ? (
-              <div style={{ fontSize: 11, color: C.muted, textAlign: "center", paddingTop: 12 }}>No proposals</div>
-            ) : proposals.map(cfg => (
-              <div key={cfg.id} onClick={() => setConfigModal(cfg)} style={{ background: "rgba(255,255,255,0.02)", border: `1px solid ${C.border}`, borderRadius: 8, padding: 12, marginBottom: 8, cursor: "pointer", borderLeft: `3px solid ${cfg.security ? C.red : C.blue}` }}>
-                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6, gap: 8 }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0, flex: 1 }}>
-                    {cfg.security && <span style={{ fontSize: FS.logBadge, padding: "1px 5px", borderRadius: 3, background: C.red + "18", color: C.red, fontFamily: "monospace", fontWeight: 700, flexShrink: 0 }}>SECURITY</span>}
-                    <span style={{ fontSize: FS.proposalTitle, fontWeight: 700, color: C.text, wordBreak: "break-word" }}>{cfg.title}</span>
-                  </div>
-                  <span style={{ fontSize: FS.logBadge, padding: "2px 8px", borderRadius: 4, background: C.yellow + "18", color: C.yellow, fontFamily: "monospace", fontWeight: 700, flexShrink: 0, alignSelf: "flex-start" }}>{cfg.status}</span>
-                </div>
-                <div style={{ fontSize: FS.proposalReason, color: C.muted, marginBottom: 8, lineHeight: 1.5, wordBreak: "break-word" }}>{cfg.reason}</div>
-                {cfg.projected_improvement && <div style={{ fontSize: FS.proposalReason, fontFamily: "monospace", color: C.green, marginBottom: 8, wordBreak: "break-word" }}>Projected: {cfg.projected_improvement}</div>}
-                <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginBottom: 10 }}>
-                  {Object.entries(cfg.validation_checks || {}).map(([k, v]) => (
-                    <span key={k} style={{ fontSize: FS.validationLabel, fontWeight: 700, padding: "2px 6px", borderRadius: 3, background: v ? C.green + "12" : C.red + "12", color: v ? C.green : C.red, fontFamily: "monospace" }}>{v ? "✓" : "✗"} {k}</span>
-                  ))}
-                </div>
-                <div style={{ background: "#0d1117", borderRadius: 6, padding: 8, fontFamily: "monospace", fontSize: FS.diff, lineHeight: 1.7, maxHeight: 120, overflow: "auto" }}>
-                  {(cfg.diff || []).slice(0, 8).map((d, i) => (
-                    <div key={i} style={{ padding: "1px 6px", background: d.type === "add" ? "rgba(16,185,129,0.08)" : d.type === "remove" ? "rgba(239,68,68,0.08)" : "transparent", color: d.type === "add" ? C.green : d.type === "remove" ? C.red : C.muted, whiteSpace: "pre" }}>
-                      {d.type === "add" ? "+ " : d.type === "remove" ? "- " : "  "}{d.line || d.content}
-                    </div>
-                  ))}
-                </div>
-                {cfg.status === "pending" && (
-                  <div style={{ display: "flex", gap: 8, marginTop: 10 }} onClick={e => e.stopPropagation()}>
-                    <button onClick={() => onConfigAction(cfg.id, "approved", "", cfg.changes)} style={{ flex: 1, padding: 8, borderRadius: 6, fontSize: FS.validationLabel, fontWeight: 700, cursor: "pointer", background: C.green + "18", border: `1px solid ${C.green}44`, color: C.green }}>✓ Approve & Push</button>
-                    <button onClick={() => onConfigAction(cfg.id, "rejected", "", cfg.changes)} style={{ flex: 1, padding: 8, borderRadius: 6, fontSize: FS.validationLabel, fontWeight: 700, cursor: "pointer", background: C.red + "18", border: `1px solid ${C.red}44`, color: C.red }}>✗ Reject</button>
-                  </div>
-                )}
-              </div>
-            ))}
+    <Panel title="Config Proposals" badge={v2PendingCount} style={{ height: "100%", minHeight: 0 }}>
+      {v2Proposals.length === 0 ? (
+        <div style={{ fontSize: FS.body, color: C.muted, textAlign: "center", paddingTop: 14 }}>
+          No proposals
+        </div>
+      ) : v2Proposals.map(p => (
+        <V2ProposalCard
+          key={p.id}
+          p={p}
+          isPulsing={pulseId === p.id}
+          isDeploying={deployingIds.has(p.id) || p.status === "deploying"}
+          onApprove={() => v2Approve(p.id)}
+          onReject={() => v2Reject(p.id)}
+        />
+      ))}
     </Panel>
   );
 
@@ -2043,6 +2302,12 @@ export default function App() {
     try {
       const r = await fetch(`${API}${map[type]}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
       const result = await r.json();
+      // Reset additionally clears the v2 proposal list (belt + suspenders —
+      // /api/demo/reset already does this server-side, but hitting the
+      // dedicated endpoint also refetches quickly).
+      if (type === "reset") {
+        try { await fetch(`${API}/api/proposals`, { method: "DELETE" }); } catch {}
+      }
       setTimeout(async () => { try { const sr = await fetch(`${API}/api/state`); setState(await sr.json()); } catch {} }, 400);
     } catch {}
   };
@@ -2062,6 +2327,7 @@ export default function App() {
 
   return (
     <div style={{ height: "100vh", background: C.bg, color: C.text, fontFamily: "'DM Sans','Segoe UI',system-ui,sans-serif", display: "flex", flexDirection: "column", overflow: "hidden" }}>
+      <GlobalStyles />
       {/* HEADER */}
       <div style={{ padding: "10px 20px", borderBottom: `1px solid ${C.border}`, display: "flex", alignItems: "center", gap: 16, flexShrink: 0 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10, marginRight: 8 }}>

@@ -12,6 +12,7 @@ from pydantic import BaseModel
 from agent.te_agent import ORCAAgent, get_config_proposals, update_proposal_status, clear_proposals, get_security_alerts, clear_security_alerts
 from agent.adapter import ContainerlabAdapter
 from agent.notifications import send_email, build_tac_email, get_pending_emails, clear_emails
+from agent import v2_proposals
 
 adapter = ContainerlabAdapter()
 agent = ORCAAgent(adapter=adapter)
@@ -118,8 +119,58 @@ async def reset_network():
     global adapter
     adapter = ContainerlabAdapter()
     agent.adapter = adapter
+    # v2 demo reset also clears the v2 proposal list so repeat Act 1 / Act 2
+    # runs in rehearsal don't show stale cards from the previous take.
+    v2_proposals.clear_proposals()
     asyncio.create_task(_broadcast_state())
     return {"status": "reset", "message": "Network reset to baseline"}
+
+# ── v2 Config Proposals workflow ──────────────────────────────────────────────
+# New endpoints at /api/proposals (distinct from the v1 /api/config-proposals
+# store wired to the baseline test suite). See agent/v2_proposals.py.
+
+class V2ProposalCreate(BaseModel):
+    title: str = ""
+    reason: str = ""
+    projected_impact: str = ""
+    diff: list = []
+    validation_gates: list = []
+    triggering_incident_id: str = ""
+
+class V2ProposalAction(BaseModel):
+    comment: str = ""
+
+@app.get("/api/proposals")
+async def v2_list_proposals():
+    return {"proposals": v2_proposals.get_proposals()}
+
+@app.post("/api/proposals")
+async def v2_create_proposal(req: V2ProposalCreate):
+    p = v2_proposals.create_proposal(req.dict())
+    await manager.broadcast({
+        "type": "agent_status",
+        "timestamp": datetime.utcnow().isoformat(),
+        "data": {
+            "status":  "proposal_created",
+            "message": f"📝 {p['id']} created — {p['title']}",
+        },
+    })
+    return p
+
+@app.delete("/api/proposals")
+async def v2_clear_proposals():
+    v2_proposals.clear_proposals()
+    return {"status": "cleared"}
+
+@app.post("/api/proposals/{proposal_id}/approve")
+async def v2_approve_proposal(proposal_id: str, body: V2ProposalAction = V2ProposalAction()):
+    result = await v2_proposals.approve_proposal(proposal_id, manager.broadcast)
+    return result
+
+@app.post("/api/proposals/{proposal_id}/reject")
+async def v2_reject_proposal(proposal_id: str, body: V2ProposalAction = V2ProposalAction()):
+    result = await v2_proposals.reject_proposal(proposal_id, manager.broadcast, body.comment)
+    return result
 
 async def _broadcast_state():
     await asyncio.sleep(0.3)
