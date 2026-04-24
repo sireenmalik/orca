@@ -344,6 +344,25 @@ async def _deploy(p: dict, broadcast) -> None:
                         "proposal_id":   p["id"],
                     },
                 })
+
+            # ── Act 1 only: flip Churn Forecast to the recovered state ──
+            # Act 2 is a transport workaround, not a revenue recovery, so
+            # it intentionally does NOT update churn metrics. Keeping the
+            # two acts' narratives cleanly separated: Act 1 = revenue
+            # protected; Act 2 = Nokia TAC handoff.
+            if scenario_id == "slice-a-qos-drift":
+                from agent import churn_state
+                new_state = churn_state.trigger_slice_a_recovery()
+                await broadcast({
+                    "type":      "churn_updated",
+                    "timestamp": datetime.utcnow().isoformat(),
+                    "data": {
+                        "phase":            new_state.get("phase"),
+                        "transitioned_at":  new_state.get("transitioned_at"),
+                        "triggered_by":     scenario_id,
+                        "proposal_id":      p["id"],
+                    },
+                })
     finally:
         _deploying.discard(p["id"])
 

@@ -2132,7 +2132,358 @@ function SecurityTab({ events }) {
   );
 }
 
+// ─── CHURN FORECAST ──────────────────────────────────────────────────────────
+// v2 demo: 4 regions — top summary / cohort table / time-series / revenue
+// callout. Slice-A Enterprise is the star; when /api/churn phase flips
+// from "baseline" to "recovered" (after Act 1 deploy), numbers animate
+// down over 3s. Baseline snapshot for animation start is hard-coded so
+// it works even on a first-mount post-transition.
+const CHURN_BASELINE_SNAPSHOT = {
+  cohorts: [
+    { id: "slice-a", name: "slice-A Enterprise",      is_star: true,  subscribers_total: 842,   at_risk: 423, at_risk_pct: 50.2, arr_exposed_usd: 1_200_000, status: "amber", sparkline: [18,28,42,65,110,180,260,340,423], note: "Session skew + QER drift → p99 climbing" },
+    { id: "slice-b", name: "slice-B Consumer",        is_star: false, subscribers_total: 15_000,at_risk: 280, at_risk_pct: 1.9,  arr_exposed_usd: 420_000,   status: "green", sparkline: [265,270,278,282,280,276,279,281,280], note: "Stable — baseline fluctuation" },
+    { id: "slice-c", name: "slice-C IoT",             is_star: false, subscribers_total: 50_000,at_risk: 120, at_risk_pct: 0.24, arr_exposed_usd: 180_000,   status: "green", sparkline: [112,116,118,120,122,119,121,120,120], note: "Stable — healthy" },
+    { id: "slice-d", name: "slice-D MVNO wholesale",  is_star: false, subscribers_total: 25_000,at_risk: 24,  at_risk_pct: 0.10, arr_exposed_usd: 2_300_000, status: "amber", sparkline: [20,21,22,23,24,24,23,24,24], note: "High $/subscriber — watchlist" },
+  ],
+  time_series: [
+    { t_hours_ago: 24, at_risk: 80 },  { t_hours_ago: 21, at_risk: 88 },
+    { t_hours_ago: 18, at_risk: 102 }, { t_hours_ago: 15, at_risk: 135 },
+    { t_hours_ago: 12, at_risk: 188 }, { t_hours_ago: 9,  at_risk: 255 },
+    { t_hours_ago: 6,  at_risk: 340 }, { t_hours_ago: 3,  at_risk: 395 },
+    { t_hours_ago: 0,  at_risk: 423 },
+  ],
+  at_risk_total: 847,
+  revenue_at_risk_usd: 4_100_000,
+  forecast_confidence: 87,
+  phase: "baseline",
+  callout: { cohort: "slice-A Enterprise", subscribers: 842, arr_usd: 2_400_000, sla_commitment: "15ms N3 one-way" },
+};
+
+const CHURN_STATUS_STYLE = {
+  green: { bg: C.green + "18",  fg: C.green,  label: "GREEN"  },
+  amber: { bg: C.yellow + "18", fg: C.yellow, label: "AMBER"  },
+  red:   { bg: C.red + "18",    fg: C.red,    label: "RED"    },
+};
+
+function fmtMoney(n) {
+  const v = Number(n) || 0;
+  if (v >= 1_000_000) return `$${(v/1_000_000).toFixed(v >= 10_000_000 ? 0 : 1)}M`;
+  if (v >= 1_000)     return `$${(v/1_000).toFixed(0)}K`;
+  return `$${v.toFixed(0)}`;
+}
+
+function fmtCount(n) {
+  const v = Number(n) || 0;
+  if (v >= 1_000) return v.toLocaleString();
+  return `${v}`;
+}
+
+// Tiny SVG sparkline for the cohort table trend column.
+function Sparkline({ points, color, width = 70, height = 22 }) {
+  if (!points || points.length < 2) return <svg width={width} height={height} />;
+  const min = Math.min(...points), max = Math.max(...points);
+  const range = Math.max(max - min, 1);
+  const sx = (i) => (i / (points.length - 1)) * width;
+  const sy = (v) => height - 2 - ((v - min) / range) * (height - 4);
+  const d = points.map((v, i) => `${i ? "L" : "M"}${sx(i).toFixed(1)},${sy(v).toFixed(1)}`).join(" ");
+  return (
+    <svg width={width} height={height} style={{ display: "block" }}>
+      <path d={d} fill="none" stroke={color} strokeWidth={1.6} strokeLinejoin="round" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+// Time-series line + area chart. `data` is array of {t_hours_ago, at_risk}.
+function AtRiskTimeSeries({ data, sliceAColor }) {
+  if (!data || data.length < 2) return null;
+  const W = 520, H = 220;
+  const padL = 44, padR = 16, padT = 14, padB = 28;
+  const pw = W - padL - padR, ph = H - padT - padB;
+  const vMin = 0;
+  const vMax = Math.max(500, ...data.map(d => d.at_risk));
+  // x axis: -24h (left) → 0h "now" (right); recovery point with t_hours_ago<0 extends slightly past
+  const tMin = -24, tMax = Math.max(0, ...data.map(d => -d.t_hours_ago));
+  const sx = (hoursFromPast) => padL + ((hoursFromPast - tMin) / (tMax - tMin)) * pw;
+  const sy = (v) => padT + ph - ((v - vMin) / (vMax - vMin)) * ph;
+  const pts = data.map(d => ({ x: sx(-d.t_hours_ago), y: sy(d.at_risk) }));
+  const linePath = pts.map((p, i) => `${i ? "L" : "M"}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" ");
+  const areaPath = `${linePath} L${pts[pts.length-1].x.toFixed(1)},${(padT + ph).toFixed(1)} L${pts[0].x.toFixed(1)},${(padT + ph).toFixed(1)} Z`;
+  const ticks = [-24, -20, -16, -12, -8, -4, 0];
+  const yTicks = [0, 100, 200, 300, 400, 500];
+  const nowX = sx(0);
+  return (
+    <svg width="100%" height={H} viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" style={{ display: "block" }}>
+      {yTicks.map(v => (
+        <g key={v}>
+          <line x1={padL} x2={W-padR} y1={sy(v)} y2={sy(v)} stroke="rgba(255,255,255,0.05)" />
+          <text x={padL-6} y={sy(v)+3} fill="#475569" fontSize={9} textAnchor="end" fontFamily="monospace">{v}</text>
+        </g>
+      ))}
+      {ticks.map(t => (
+        <text key={t} x={sx(t)} y={H-8} fill="#475569" fontSize={9} textAnchor="middle" fontFamily="monospace">{t === 0 ? "now" : `${t}h`}</text>
+      ))}
+      <path d={areaPath} fill={sliceAColor + "22"} />
+      <path d={linePath} fill="none" stroke={sliceAColor} strokeWidth={2.2} strokeLinejoin="round" />
+      {pts.map((p, i) => <circle key={i} cx={p.x} cy={p.y} r={2.2} fill={sliceAColor} />)}
+      <line x1={nowX} x2={nowX} y1={padT} y2={padT + ph} stroke="rgba(255,255,255,0.15)" strokeDasharray="3,3" />
+      <text x={nowX + 4} y={padT + 10} fill="#64748b" fontSize={9} fontFamily="monospace">now</text>
+    </svg>
+  );
+}
+
 function ChurnTab({ events }) {
+  // Live state from backend (/api/churn). `displayed` is what's actually
+  // on screen — animates between baseline and recovered during the grace
+  // window, snaps otherwise.
+  const [churn, setChurn] = useState(CHURN_BASELINE_SNAPSHOT);
+  const [displayed, setDisplayed] = useState(CHURN_BASELINE_SNAPSHOT);
+  const animatedForTransitionRef = useRef(null);  // transitioned_at value we already animated for
+  const rafRef = useRef(0);
+
+  const fetchChurn = useCallback(async () => {
+    try {
+      const r = await fetch(`${API}/api/churn`);
+      const d = await r.json();
+      setChurn(d);
+    } catch {}
+  }, []);
+
+  // Fetch on mount + every 10s + on churn_updated event
+  useEffect(() => {
+    fetchChurn();
+    const t = setInterval(fetchChurn, 10000);
+    return () => clearInterval(t);
+  }, [fetchChurn]);
+  useEffect(() => {
+    const last = events[events.length - 1];
+    if (last?.type === "churn_updated") fetchChurn();
+  }, [events, fetchChurn]);
+
+  // Animation / snap decision whenever churn state changes.
+  useEffect(() => {
+    if (!churn) return;
+    // Cancel any in-flight animation first (defensive — rapid reset+inject
+    // cycles shouldn't leave a zombie RAF loop writing stale values).
+    if (rafRef.current) cancelAnimationFrame(rafRef.current);
+
+    if (churn.phase === "baseline") {
+      animatedForTransitionRef.current = null;
+      setDisplayed(churn);
+      return;
+    }
+    // phase === "recovered"
+    const tsKey = churn.transitioned_at || "recovered";
+    if (animatedForTransitionRef.current === tsKey) {
+      // Already played animation for this transition. Keep current displayed.
+      setDisplayed(churn);
+      return;
+    }
+    const transitionedAt = churn.transitioned_at ? new Date(churn.transitioned_at).getTime() : 0;
+    const dt = Date.now() - transitionedAt;
+    if (dt > 8000) {
+      // Past grace window — snap. Mark as animated so we don't re-fire.
+      animatedForTransitionRef.current = tsKey;
+      setDisplayed(churn);
+      return;
+    }
+    // Within grace window → play animation from baseline to recovered.
+    animatedForTransitionRef.current = tsKey;
+    const from = CHURN_BASELINE_SNAPSHOT;
+    const to = churn;
+    const durationMs = 3000;
+    const startTs = performance.now();
+    const interp = (a, b, e) => a + (b - a) * e;
+
+    const step = (now) => {
+      const t = Math.min(1, (now - startTs) / durationMs);
+      const eased = 1 - Math.pow(1 - t, 3);  // ease-out cubic
+
+      // Interpolate cohorts (only slice-A actually changes in the recovery)
+      const nextCohorts = to.cohorts.map(toCohort => {
+        const fromCohort = from.cohorts.find(c => c.id === toCohort.id) || toCohort;
+        if (toCohort.id !== "slice-a") return toCohort;
+        return {
+          ...toCohort,
+          at_risk:         Math.round(interp(fromCohort.at_risk, toCohort.at_risk, eased)),
+          at_risk_pct:    +interp(fromCohort.at_risk_pct, toCohort.at_risk_pct, eased).toFixed(1),
+          arr_exposed_usd: Math.round(interp(fromCohort.arr_exposed_usd, toCohort.arr_exposed_usd, eased)),
+          // Status flips partway through (amber → green at ~70% progress)
+          status: eased > 0.7 ? toCohort.status : fromCohort.status,
+          // Sparkline cliff revealed at ~70%
+          sparkline: eased > 0.7 ? toCohort.sparkline : fromCohort.sparkline,
+        };
+      });
+      const nextAtRiskTotal = nextCohorts.reduce((s, c) => s + c.at_risk, 0);
+      const nextRevenue     = nextCohorts.reduce((s, c) => s + c.arr_exposed_usd, 0);
+      // Time-series: reveal the recovery drop point at ~50% progress
+      const nextSeries = eased > 0.5 ? to.time_series : from.time_series;
+
+      setDisplayed({
+        ...to,
+        cohorts: nextCohorts,
+        at_risk_total:        Math.round(interp(from.at_risk_total,        nextAtRiskTotal, 1)),
+        revenue_at_risk_usd:  Math.round(interp(from.revenue_at_risk_usd,  nextRevenue,     1)),
+        forecast_confidence:  Math.round(interp(from.forecast_confidence, to.forecast_confidence, eased)),
+        time_series:          nextSeries,
+      });
+
+      if (t < 1) rafRef.current = requestAnimationFrame(step);
+    };
+    rafRef.current = requestAnimationFrame(step);
+    return () => { if (rafRef.current) cancelAnimationFrame(rafRef.current); };
+  }, [churn]);
+
+  const handleDemoResetChurn = async () => {
+    try { await fetch(`${API}/api/churn/reset`, { method: "POST" }); } catch {}
+    await fetchChurn();
+  };
+
+  if (!displayed) return null;
+
+  const sliceAColor = "#a855f7";  // matches topology slice-A purple
+  const sliceA = displayed.cohorts.find(c => c.id === "slice-a");
+  const deltaChips = {
+    at_risk: displayed.phase === "recovered" ? "▼ 409 last minute" : "▲ 47 last hour",
+    revenue: displayed.phase === "recovered" ? "▼ $1.16M last minute" : "▲ $230K last hour",
+    forecast: displayed.phase === "recovered" ? "▲ 5 points" : "steady",
+  };
+  const deltaColor = displayed.phase === "recovered" ? C.green : C.muted;
+
+  return (
+    <div style={{ height: "100%", display: "flex", flexDirection: "column", gap: 12, padding: 12, overflow: "auto", position: "relative" }}>
+
+      {/* Subdued demo-reset affordance top-right */}
+      <button
+        onClick={handleDemoResetChurn}
+        title="Reset churn numbers to baseline (demo rehearsal only — does not touch scenarios or proposals)"
+        style={{
+          position: "absolute", top: 6, right: 10,
+          padding: "3px 9px", borderRadius: 4,
+          fontSize: FS.logBadge, fontWeight: 600,
+          background: "rgba(255,255,255,0.03)", color: "#475569",
+          border: `1px solid ${C.border}`, cursor: "pointer",
+          opacity: 0.6,
+        }}
+      >↺ churn-only reset</button>
+
+      {/* REGION A — top summary band */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, flexShrink: 0 }}>
+        {[
+          { label: "At-risk subscribers",         value: fmtCount(displayed.at_risk_total), chip: deltaChips.at_risk, emphasisColor: displayed.at_risk_total > 500 ? C.yellow : C.green },
+          { label: "Revenue at risk · 30-day",    value: fmtMoney(displayed.revenue_at_risk_usd), chip: deltaChips.revenue, emphasisColor: displayed.revenue_at_risk_usd > 3_000_000 ? C.yellow : C.green },
+          { label: "Forecast confidence",         value: `${displayed.forecast_confidence}%`, chip: deltaChips.forecast, emphasisColor: C.blue },
+        ].map((c, i) => (
+          <div key={i} style={{
+            background: C.panel, border: `1px solid ${C.border}`, borderRadius: 8,
+            borderLeft: `3px solid ${c.emphasisColor}`,
+            padding: "14px 18px",
+          }}>
+            <div style={{ fontSize: FS.logBadge, color: C.muted, letterSpacing: 1, textTransform: "uppercase", marginBottom: 6 }}>{c.label}</div>
+            <div style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap" }}>
+              <span style={{ fontSize: "clamp(24px, 2.2vw, 36px)", fontWeight: 700, fontFamily: "monospace", color: C.text, transition: "color 0.4s" }}>
+                {c.value}
+              </span>
+              <span style={{ fontSize: FS.logBadge, fontWeight: 600, fontFamily: "monospace", color: deltaColor }}>
+                {c.chip}
+              </span>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Main two-column area: cohort table + time-series */}
+      <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 55fr) minmax(0, 45fr)", gap: 12, flex: 1, minHeight: 0 }}>
+
+        {/* REGION B — cohort breakdown */}
+        <Panel title="Cohort breakdown">
+          <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 2fr) 0.7fr 0.8fr 0.7fr 1fr 80px 0.7fr", columnGap: 10, rowGap: 6, alignItems: "center" }}>
+            {/* Header */}
+            {["Cohort", "Subscribers", "At risk", "%", "ARR exposed", "Trend", "Status"].map((h, i) => (
+              <div key={`h-${i}`} style={{ fontSize: FS.logBadge, color: C.muted, letterSpacing: 1, textTransform: "uppercase", paddingBottom: 6, borderBottom: `1px solid ${C.border}` }}>{h}</div>
+            ))}
+            {/* Rows */}
+            {displayed.cohorts.map(c => {
+              const st = CHURN_STATUS_STYLE[c.status] || CHURN_STATUS_STYLE.green;
+              const sparkColor = c.is_star ? sliceAColor : (st.fg);
+              return (
+                <Fragment key={c.id}>
+                  <div style={{
+                    fontSize: c.is_star ? FS.proposalTitle : FS.body,
+                    fontWeight: c.is_star ? 700 : 600,
+                    color: C.text,
+                    paddingLeft: c.is_star ? 8 : 0,
+                    borderLeft: c.is_star ? `3px solid ${sliceAColor}` : "3px solid transparent",
+                    padding: c.is_star ? "8px 0 8px 10px" : "7px 0",
+                    wordBreak: "break-word",
+                  }}>
+                    <div>{c.name}</div>
+                    <div style={{ fontSize: FS.logTimestamp, color: C.muted, fontWeight: 400, marginTop: 2 }}>{c.note}</div>
+                  </div>
+                  <div style={{ fontSize: FS.body, fontFamily: "monospace", color: C.muted }}>{fmtCount(c.subscribers_total)}</div>
+                  <div style={{ fontSize: FS.body, fontFamily: "monospace", fontWeight: 700, color: C.text, transition: "color 0.4s" }}>{fmtCount(c.at_risk)}</div>
+                  <div style={{ fontSize: FS.body, fontFamily: "monospace", color: st.fg }}>{c.at_risk_pct.toFixed(1)}%</div>
+                  <div style={{ fontSize: FS.body, fontFamily: "monospace", fontWeight: 600, color: C.text }}>{fmtMoney(c.arr_exposed_usd)}</div>
+                  <Sparkline points={c.sparkline} color={sparkColor} />
+                  <span style={{
+                    justifySelf: "start",
+                    fontSize: FS.logBadge, fontWeight: 700, padding: "3px 9px", borderRadius: 4,
+                    background: st.bg, color: st.fg, fontFamily: "monospace",
+                    transition: "background 0.4s, color 0.4s",
+                  }}>
+                    {st.label}
+                  </span>
+                </Fragment>
+              );
+            })}
+          </div>
+        </Panel>
+
+        {/* REGION C — time series */}
+        <Panel title="Slice-A Enterprise · at-risk subscribers over time">
+          <div style={{ display: "flex", flexDirection: "column", height: "100%", gap: 10 }}>
+            <div style={{ fontSize: FS.logBadge, color: C.muted }}>last 24 hours · live</div>
+            <div style={{ flex: 1, minHeight: 180 }}>
+              <AtRiskTimeSeries data={displayed.time_series} sliceAColor={sliceAColor} />
+            </div>
+          </div>
+        </Panel>
+      </div>
+
+      {/* REGION D — revenue callout band */}
+      <div style={{
+        background: "rgba(168,85,247,0.06)",
+        border: `1px solid ${sliceAColor}44`,
+        borderLeft: `4px solid ${sliceAColor}`,
+        borderRadius: 8,
+        padding: "12px 18px",
+        display: "flex", alignItems: "center", gap: 18,
+        flexShrink: 0, flexWrap: "wrap",
+      }}>
+        <div style={{ fontSize: FS.logBadge, color: C.muted, letterSpacing: 1, textTransform: "uppercase" }}>
+          Star cohort
+        </div>
+        <div style={{ fontSize: FS.proposalTitle, fontWeight: 700, color: C.text }}>
+          {displayed.callout?.cohort || "slice-A Enterprise"}
+        </div>
+        <div style={{ fontSize: FS.body, color: C.muted }}>·</div>
+        <div style={{ fontSize: FS.body, fontFamily: "monospace", color: C.text }}>
+          {fmtCount(displayed.callout?.subscribers || 842)} subscribers
+        </div>
+        <div style={{ fontSize: FS.body, color: C.muted }}>·</div>
+        <div style={{ fontSize: FS.body, fontFamily: "monospace", fontWeight: 700, color: C.text }}>
+          {fmtMoney(displayed.callout?.arr_usd || 2_400_000)} ARR
+        </div>
+        <div style={{ fontSize: FS.body, color: C.muted }}>·</div>
+        <div style={{ fontSize: FS.body, fontFamily: "monospace", color: C.text }}>
+          SLA: {displayed.callout?.sla_commitment || "15ms N3 one-way"}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Unused — v1 ChurnTab internals retained for reference but not rendered.
+function _v1ChurnTabLegacy({ events }) {
   const [risks, setRisks] = useState({});
   const [lastIncident, setLastIncident] = useState(null);
 

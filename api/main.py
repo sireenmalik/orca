@@ -14,6 +14,7 @@ from agent.adapter import ContainerlabAdapter
 from agent.notifications import send_email, build_tac_email, get_pending_emails, clear_emails
 from agent import v2_proposals
 from agent import scenarios as v2_scenarios
+from agent import churn_state
 
 adapter = ContainerlabAdapter()
 agent = ORCAAgent(adapter=adapter)
@@ -134,6 +135,12 @@ async def reset_network():
     _reset_to_baseline()
     v2_proposals.clear_proposals()
     clear_emails()  # demo rerun hygiene
+    churn_state.reset()
+    await manager.broadcast({
+        "type": "churn_updated",
+        "timestamp": datetime.utcnow().isoformat(),
+        "data": {"phase": "baseline"},
+    })
     asyncio.create_task(_broadcast_state())
     return {"status": "reset", "message": "Network reset to baseline"}
 
@@ -171,8 +178,33 @@ async def reset_scenarios():
     )
     v2_proposals.clear_proposals()
     clear_emails()  # demo rerun hygiene (will be populated in Prompt 6)
+    churn_state.reset()
+    await manager.broadcast({
+        "type": "churn_updated",
+        "timestamp": datetime.utcnow().isoformat(),
+        "data": {"phase": "baseline"},
+    })
     asyncio.create_task(_broadcast_state())
     return {**r, "state": "baseline"}
+
+# ── v2 Churn Forecast ─────────────────────────────────────────────────────────
+# Dashboard-flavor state; not a real churn model. Act 1 approval flips
+# slice-A from 423 → 14 at-risk via trigger_slice_a_recovery (hooked in
+# v2_proposals._deploy).
+
+@app.get("/api/churn")
+async def get_churn():
+    return churn_state.get_state()
+
+@app.post("/api/churn/reset")
+async def reset_churn_tab():
+    churn_state.reset()
+    await manager.broadcast({
+        "type": "churn_updated",
+        "timestamp": datetime.utcnow().isoformat(),
+        "data": {"phase": "baseline"},
+    })
+    return {"status": "baseline"}
 
 # ── v2 Config Proposals workflow ──────────────────────────────────────────────
 # New endpoints at /api/proposals (distinct from the v1 /api/config-proposals
