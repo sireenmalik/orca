@@ -1,0 +1,19 @@
+# ORCA Config Proposal — R1
+# Generated: 2026-04-23T09:43:55.625666Z
+# Incident: R1-R4 link failure created suboptimal routing causing congestion. Adjust metrics to distribute traffic more evenly and optimize for the current topology without the R1-R4 direct link.
+# Branch: cfg/R1-20260423-094354
+
+configure router isis 0
+    interface "unknown"
+-       metric ?
++       metric ?
+    exit
+    interface "unknown"
+-       metric ?
++       metric ?
+    exit
+    interface "unknown"
+-       metric ?
++       metric ?
+    exit
+exit
