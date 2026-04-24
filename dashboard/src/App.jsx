@@ -2040,6 +2040,16 @@ function V2EmailRow({ email, onSend, onDiscard, onOpen }) {
             📎 {atts.length} attachment{atts.length === 1 ? "" : "s"}
           </span>
         )}
+        {/* AUTO marker for auto-sent early notifications (Prompt 9) —
+            visually distinct from human-sent drafts */}
+        {email.tag === "early_notification" && (
+          <span style={{
+            fontSize: FS.logBadge, fontWeight: 700, padding: "2px 7px", borderRadius: 3,
+            background: C.blue + "18", color: C.blue,
+            fontFamily: "monospace", letterSpacing: 0.5,
+            border: `1px solid ${C.blue}44`,
+          }} title="Auto-sent by ORCA at diagnosis completion — no human action required">AUTO</span>
+        )}
         <span style={{
           fontSize: FS.logBadge, fontWeight: 700, padding: "2px 8px", borderRadius: 4,
           background: s.bg, color: s.fg, fontFamily: "monospace", letterSpacing: 0.5,

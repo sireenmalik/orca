@@ -448,13 +448,52 @@ async def _play(scenario: dict, broadcast, adapter) -> None:
         if template:
             await asyncio.sleep(0.4)
             # Late-import to avoid a circular import at module load time.
-            from agent import v2_proposals
+            from agent import v2_proposals, v2_emails
             payload = dict(template)
             payload.setdefault("triggering_incident_id", scenario["id"])
             created = v2_proposals.create_proposal(payload)
-            # Also stash the scenario id so post-approval recovery
-            # entries can key off it.
             created["triggering_scenario_id"] = scenario["id"]
+
+            # ── Early notification email (pre-approval, auto-SENT) ─────
+            # Fires BEFORE we announce the proposal in the reasoning log
+            # so the visual flow is:
+            #   CONCLUDE ("Proposal ready for human approval.")
+            #   SYSTEM   ("Early notification sent to NOC...")
+            #   SYSTEM   ("Config proposal created · ID v2-cfg-... awaiting approval")
+            # which matches Prompt-9's "between the conclude and card
+            # materialization" spec.
+            early_factory = v2_emails.EARLY_EMAIL_FACTORIES.get(scenario["id"])
+            if early_factory:
+                early_payload = early_factory(created)
+                early = v2_emails.create(early_payload)
+                await broadcast({
+                    "type":      "email_created",
+                    "timestamp": datetime.utcnow().isoformat(),
+                    "data": {
+                        "id":                     early["id"],
+                        "type":                   early["type"],
+                        "subject":                early["subject"],
+                        "tag":                    early.get("tag"),
+                        "status":                 early.get("status"),
+                        "triggering_proposal_id": created["id"],
+                    },
+                })
+                early_log = v2_emails.EARLY_SYSTEM_LOG.get(scenario["id"])
+                if early_log:
+                    await broadcast({
+                        "type":      "scenario_log",
+                        "timestamp": datetime.utcnow().isoformat(),
+                        "data": {
+                            "seq":           -2,
+                            "subtype":       "system",
+                            "content":       early_log,
+                            "is_conclusion": False,
+                            "scenario_id":   scenario["id"],
+                            "proposal_id":   created["id"],
+                            "email_id":      early["id"],
+                        },
+                    })
+
             # System-type reasoning log entry announcing the proposal.
             msg = f"Config proposal created · ID {created['id']} · awaiting human approval"
             if scenario["id"] == "transport-congestion-upf-innocent":

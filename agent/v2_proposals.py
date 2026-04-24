@@ -134,6 +134,67 @@ def _find(proposal_id: str) -> Optional[dict]:
     return next((p for p in _proposals if p.get("id") == proposal_id), None)
 
 
+def _gh_call(method: str, path: str, token: str, data=None):
+    """Stdlib GitHub API helper used by both config PR + episode PR paths."""
+    owner = os.getenv("GITHUB_OWNER", "sireenmalik")
+    repo  = os.getenv("GITHUB_REPO",  "orca")
+    url = f"https://api.github.com/repos/{owner}/{repo}{path}"
+    body = json.dumps(data).encode() if data is not None else None
+    req = urllib.request.Request(
+        url, data=body, method=method,
+        headers={
+            "Authorization": f"token {token}",
+            "Accept":        "application/vnd.github.v3+json",
+            "Content-Type":  "application/json",
+        },
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=15) as r:
+            return json.loads(r.read().decode() or "{}"), r.status
+    except urllib.error.HTTPError as e:
+        try:   return json.loads(e.read().decode() or "{}"), e.code
+        except Exception: return {"message": "http error"}, e.code
+
+
+# Scenario id → recovery metrics table used in the episode PR body
+# + post-deploy email. Matches what the Churn Forecast tab animates to
+# for Act 1; Act 2 is transport-narrative-focused (no churn delta).
+EPISODE_RECOVERY_METRICS = {
+    "slice-a-qos-drift": [
+        ("slice-A p99 N3 latency",    "13.1 ms",   "8.9 ms"),
+        ("enterprise at-risk cohort", "423 subs",  "14 subs"),
+        ("revenue-at-risk",           "$1.20M",    "$40K"),
+        ("slice-A SLA headroom",      "0.1 ms",    "6.1 ms"),
+    ],
+    "transport-congestion-upf-innocent": [
+        ("slice-A p99 N3 latency",    "14.0 ms",   "9.1 ms (via alternate path)"),
+        ("LSP-1 utilization",         "93%",       "93% (unchanged — upstream)"),
+        ("alternate path util",       "24%",       "61% (absorbed migration)"),
+        ("Nokia core impact",         "—",         "contained, zero customer-facing"),
+    ],
+}
+
+# Scenario id → concise diagnosis summary for the episode PR body
+EPISODE_DIAGNOSIS_SUMMARY = {
+    "slice-a-qos-drift": (
+        "Pre-threshold detection engaged as slice-A p99 N3 latency on UPF-01 "
+        "climbed from 11.2 ms toward the 15 ms SLA threshold. Session-table "
+        "audit revealed full skew to UPF-01 (637 sessions vs 0 on UPF-02). "
+        "QER-table audit revealed enforcement drifted to 32 Mbps vs 50 Mbps "
+        "committed GBR (-36%). Dual root cause — session skew and QER drift "
+        "acted in concert. Single-cause fix would not have held."
+    ),
+    "transport-congestion-upf-innocent": (
+        "Slice-A p99 N3 latency climbing on UPF-01. UPF-01 local resources "
+        "(CPU, memory, PFCP association, QER) cleared as cause. SMF / AMF "
+        "signaling plane clean. Scope expanded to transport: LSP-1 path "
+        "PE-01 → P-02 → PE-03 showed 93% utilization on PE-01 ↔ P-02 with "
+        "microbursts. Nokia core is innocent; root cause is transport-layer "
+        "congestion upstream of UPF-01."
+    ),
+}
+
+
 async def _github_pr(proposal: dict) -> dict:
     """Create a real PR on sireenmalik/orca against main, with a
     v2/cfg/<slug>-<ts> branch prefix. Returns {pr_number, pr_url,
@@ -237,6 +298,138 @@ async def _github_pr(proposal: dict) -> dict:
         "commit_sha": commit_sha,
         "branch":     branch,
     }
+
+
+async def _github_episode_pr(proposal: dict) -> dict:
+    """Create the audit-trail episode PR on a v2/episodes/* branch.
+    Commits an episode YAML capturing the full incident-to-resolution
+    arc (diagnosis, validation, approver, recovery). Links back to the
+    config PR in its body. Returns {pr_number, pr_url, branch, commit_sha}
+    on success, or {error: ...} on failure. Never raises."""
+    token = os.getenv("GITHUB_TOKEN", "")
+    if not token:
+        return {"error": "GITHUB_TOKEN not set"}
+
+    scenario_id = proposal.get("triggering_scenario_id") or proposal.get("triggering_incident_id") or "scenario"
+    ts = datetime.utcnow().strftime("%Y%m%d-%H%M%S")
+    branch = f"v2/episodes/{scenario_id}-{ts}"
+
+    ref, _ = _gh_call("GET", "/git/ref/heads/main", token)
+    main_sha = (ref or {}).get("object", {}).get("sha", "")
+    if not main_sha:
+        return {"error": "cannot read main ref"}
+    _gh_call("POST", "/git/refs", token, {"ref": f"refs/heads/{branch}", "sha": main_sha})
+
+    # Episode YAML — captures the full arc. Deliberately minimal — the
+    # PR body is where the human-readable version lives.
+    gates = proposal.get("validation_gates") or []
+    metrics_rows = EPISODE_RECOVERY_METRICS.get(scenario_id, [])
+    ep_yaml = (
+        f"# ORCA v2 incident episode — {proposal.get('id')}\n"
+        f"# Scenario: {scenario_id}\n\n"
+        f"proposal_id: \"{proposal.get('id','')}\"\n"
+        f"triggering_scenario: \"{scenario_id}\"\n"
+        f"detected_at: \"{proposal.get('created_at','')}\"\n"
+        f"approved_at: \"{proposal.get('approved_at','')}\"\n"
+        f"deployed_at: \"{proposal.get('deployed_at','')}\"\n"
+        f"approver: \"{proposal.get('approver') or 'operator@session'}\"\n"
+        f"config_pr_url: \"{proposal.get('pr_url') or ''}\"\n"
+        f"config_pr_number: {proposal.get('pr_number') or 'null'}\n\n"
+        f"diagnosis_summary: |\n  {EPISODE_DIAGNOSIS_SUMMARY.get(scenario_id, '')}\n\n"
+        f"validation_results:\n"
+        + "\n".join(
+            f"  - name: \"{g.get('name')}\"\n"
+            f"    status: \"{g.get('status')}\"\n"
+            f"    detail: \"{g.get('detail','')}\""
+            for g in gates
+        )
+        + "\n\nrecovery_metrics:\n"
+        + "\n".join(f"  - metric: \"{m[0]}\"\n    before: \"{m[1]}\"\n    after: \"{m[2]}\"" for m in metrics_rows)
+        + "\n"
+    )
+    ep_path = f"v2-demo/episodes/{scenario_id}-{ts}.yaml"
+    _gh_call("PUT", f"/contents/{ep_path}", token, {
+        "message": f"v2 episode: {proposal.get('title','')}",
+        "content": _b64.b64encode(ep_yaml.encode()).decode(),
+        "branch":  branch,
+    })
+
+    # Build the PR body — markdown, includes the config PR backlink and
+    # the validation / metrics tables the post-deploy email references.
+    cfg_pr = proposal.get("pr_url") or "(config PR unknown)"
+    cfg_num = proposal.get("pr_number") or "?"
+    approver = proposal.get("approver") or "operator@session"
+    approved = proposal.get("approved_at") or "—"
+    detected = proposal.get("created_at") or "—"
+
+    gates_md = "\n".join(
+        f"| {g.get('name')} | {'✅ PASS' if g.get('status') == 'pass' else '❌ FAIL' if g.get('status') == 'fail' else '⏳ PENDING'} | {g.get('detail','')} |"
+        for g in gates
+    )
+    metrics_md = "\n".join(f"| {m[0]} | {m[1]} | {m[2]} |" for m in metrics_rows)
+
+    body_md = (
+        f"## 📖 ORCA v2 episode — {proposal.get('title','')}\n\n"
+        f"> Auto-generated by ORCA after the incident-to-resolution arc "
+        f"completed. Captures the full audit trail. Corresponds to config "
+        f"PR #{cfg_num}.\n\n"
+        f"**Triggering scenario**: `{scenario_id}`  \n"
+        f"**Detected at**: `{detected}`  \n"
+        f"**Approved at**: `{approved}`  \n"
+        f"**Approver**: `{approver}`\n\n"
+        f"**Resolved by config PR #{cfg_num}** · {cfg_pr}\n\n"
+        f"### Diagnosis summary\n\n"
+        f"{EPISODE_DIAGNOSIS_SUMMARY.get(scenario_id, '(no diagnosis summary available)')}\n\n"
+        f"### Validation results\n\n"
+        f"| Gate | Status | Detail |\n"
+        f"|------|--------|--------|\n"
+        f"{gates_md}\n\n"
+        f"### Recovery metrics\n\n"
+        f"| Metric | Before | After |\n"
+        f"|--------|--------|-------|\n"
+        f"{metrics_md}\n\n"
+        f"---\n\n"
+        f"*Episode committed automatically. Config + episode together comprise "
+        f"the full audit trail for this incident.*\n"
+    )
+
+    pr_data, pr_status = _gh_call("POST", "/pulls", token, {
+        "title": f"v2/episode: {proposal.get('title','')} — {datetime.utcnow().strftime('%Y-%m-%d')}",
+        "body":  body_md,
+        "head":  branch,
+        "base":  "main",
+    })
+    if pr_status not in (200, 201):
+        return {"error": f"episode PR creation failed ({pr_status}): {pr_data}"}
+
+    return {
+        "pr_number":  pr_data.get("number"),
+        "pr_url":     pr_data.get("html_url"),
+        "branch":     branch,
+    }
+
+
+async def _github_patch_config_pr_with_episode_link(config_pr_number, episode_pr_number, episode_pr_url):
+    """Append a backlink to the episode PR onto the config PR body so
+    the two PRs cross-reference each other. Read-modify-write."""
+    token = os.getenv("GITHUB_TOKEN", "")
+    if not token or not config_pr_number:
+        return False
+    current, status = _gh_call("GET", f"/pulls/{config_pr_number}", token)
+    if status != 200:
+        return False
+    existing_body = current.get("body") or ""
+    addendum = (
+        f"\n\n---\n\n"
+        f"📖 **Episode captured**: See [PR #{episode_pr_number}]({episode_pr_url}) "
+        f"for full incident context.\n"
+    )
+    if f"PR #{episode_pr_number}" in existing_body:
+        return True  # idempotent — already backlinked
+    patched, patch_status = _gh_call("PATCH", f"/pulls/{config_pr_number}", token, {
+        "body": existing_body + addendum,
+    })
+    return patch_status == 200
 
 
 async def approve_proposal(
@@ -374,9 +567,59 @@ async def _deploy(p: dict, broadcast) -> None:
                     },
                 })
 
-            # ── Draft the matching outbound email (Act 1 NOC / Act 2 TAC) ──
-            # 500ms after the 'deployed' broadcast. Email is a DRAFT —
-            # operator clicks Send to dispatch.
+            # ── Episode PR (v2/episodes/* branch) — second audit PR ─────
+            # After the config PR and deploy simulation are both complete,
+            # commit a companion episode that captures the full arc and
+            # links to the config PR. Update the config PR body with a
+            # backlink so the two cross-reference.
+            p["approver"] = p.get("approver") or "operator@session"
+            episode = await _github_episode_pr(p)
+            if not episode.get("error"):
+                p["episode_pr_number"] = episode.get("pr_number")
+                p["episode_pr_url"]    = episode.get("pr_url")
+                p["episode_branch"]    = episode.get("branch")
+                await broadcast({
+                    "type":      "pr_opened",
+                    "timestamp": datetime.utcnow().isoformat(),
+                    "data": {
+                        "pr_number": episode.get("pr_number"),
+                        "pr_url":    episode.get("pr_url"),
+                        "message":   f"📖 Episode PR #{episode.get('pr_number')} opened — {episode.get('pr_url')}",
+                    },
+                })
+                await broadcast({
+                    "type":      "scenario_log",
+                    "timestamp": datetime.utcnow().isoformat(),
+                    "data": {
+                        "seq":           -4,
+                        "subtype":       "system",
+                        "content":       f"Episode committed to Git · PR #{episode.get('pr_number')} · linked to config PR #{p.get('pr_number')}",
+                        "is_conclusion": False,
+                        "scenario_id":   scenario_id,
+                        "proposal_id":   p["id"],
+                    },
+                })
+                # Cross-link: patch the config PR body with the episode
+                # backlink. Best-effort — a GitHub blip here is harmless.
+                try:
+                    await _github_patch_config_pr_with_episode_link(
+                        p.get("pr_number"), episode.get("pr_number"), episode.get("pr_url")
+                    )
+                except Exception:
+                    pass
+            else:
+                await broadcast({
+                    "type":      "tool_error",
+                    "timestamp": datetime.utcnow().isoformat(),
+                    "data": {"tool": "github.episode_pr", "error": episode["error"]},
+                })
+
+            # ── Draft the matching outbound resolution email (Act 1 NOC /
+            # Act 2 TAC). Happens 500ms after the 'deployed' broadcast so
+            # the state-transition pulse on the card lands first. Email
+            # is a DRAFT — operator clicks Send to dispatch. Contains the
+            # approver identity, both PR links, validation table, and
+            # recovery metrics (built into the template).
             from agent import v2_emails
             factory   = v2_emails.EMAIL_FACTORIES.get(scenario_id)
             log_line  = v2_emails.DRAFTED_SYSTEM_LOG.get(scenario_id)
@@ -390,6 +633,7 @@ async def _deploy(p: dict, broadcast) -> None:
                         "id":                     drafted["id"],
                         "type":                   drafted["type"],
                         "subject":                drafted["subject"],
+                        "tag":                    drafted.get("tag"),
                         "triggering_proposal_id": p["id"],
                     },
                 })
