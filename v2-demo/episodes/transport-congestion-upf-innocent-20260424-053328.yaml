@@ -1,0 +1,48 @@
+# ORCA v2 incident episode — v2-cfg-1777008797710
+# Scenario: transport-congestion-upf-innocent
+
+proposal_id: "v2-cfg-1777008797710"
+triggering_scenario: "transport-congestion-upf-innocent"
+detected_at: "2026-04-24T05:33:17.711048Z"
+approved_at: "2026-04-24T05:33:23.795569Z"
+deployed_at: "2026-04-24T05:33:27.964499Z"
+approver: "operator@session"
+config_pr_url: "https://github.com/sireenmalik/orca/pull/71"
+config_pr_number: 71
+
+diagnosis_summary: |
+  Slice-A p99 N3 latency climbing on UPF-01. UPF-01 local resources (CPU, memory, PFCP association, QER) cleared as cause. SMF / AMF signaling plane clean. Scope expanded to transport: LSP-1 path PE-01 → P-02 → PE-03 showed 93% utilization on PE-01 ↔ P-02 with microbursts. Nokia core is innocent; root cause is transport-layer congestion upstream of UPF-01.
+
+validation_results:
+  - name: "Syntax"
+    status: "pass"
+    detail: "Valid YAML · PFCP modification IE structure per TS 29.244"
+  - name: "Semantic"
+    status: "pass"
+    detail: "UPF-01 reachable · alternate path configuration valid · session IDs valid"
+  - name: "Mission · utilization"
+    status: "pass"
+    detail: "Alternate path utilization stays < 80% · LSP-1 bypass effective"
+  - name: "Mission · slice SLA"
+    status: "pass"
+    detail: "slice-A p99 projected recovery within 15 ms SLA"
+  - name: "Digital twin"
+    status: "pass"
+    detail: "60s simulated with session re-anchoring · transport congestion bypassed successfully"
+  - name: "Policy"
+    status: "pass"
+    detail: "Session migration batch size and timing within human-approved limits"
+
+recovery_metrics:
+  - metric: "slice-A p99 N3 latency"
+    before: "14.0 ms"
+    after: "9.1 ms (via alternate path)"
+  - metric: "LSP-1 utilization"
+    before: "93%"
+    after: "93% (unchanged — upstream)"
+  - metric: "alternate path util"
+    before: "24%"
+    after: "61% (absorbed migration)"
+  - metric: "Nokia core impact"
+    before: "—"
+    after: "contained, zero customer-facing"
