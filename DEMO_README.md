@@ -1,111 +1,111 @@
-# ORCA Demo Ops — v1 ↔ v2 Switching
+# ORCA DEMO — Operator Cheat Sheet
 
-This repo hosts two parallel demos:
+## Demo URL
+**http://157.230.174.132**  ·  hard-refresh before each run: `Ctrl+Shift+R`
 
-| Version | Branch | Droplet path | Port | Theme |
-|---|---|---|---|---|
-| `v1.0.0` | `main` (pinned to tag `v1.0.0`) | `/opt/orca` | 80 | IP/MPLS transport ops — LSP reroute + security + churn |
-| `v2.x`   | `demo/5g-ran`                   | `/opt/orca-v2` | 80 | 5G RAN ops — gNBs + UPFs + slice SLA + transport correlation |
+## Switching between v1 and v2
+```
+demo-v1    # v1.0.0 — transport-only baseline
+demo-v2    # v2.0.0 — 5G RAN pivot
+```
+Currently running: **v2**
 
-Both share port 80, so **only one runs at a time**. Switching is controlled by two shell scripts installed on the droplet host.
+## Pre-demo checklist (60s)
+```
+cd /opt/orca-v2 && ./scripts/preflight.sh
+```
+If anything is WARN: click Reset in the Operations tab. If anything is FAIL: stop and fix.
 
 ---
 
-## Switching
+## Act sequence
 
-From any droplet SSH session:
-
-```
-demo-v1      # stops v2, starts v1, verifies /api/health before returning
-demo-v2      # stops v1, starts v2, verifies /api/health before returning
-```
-
-Both scripts:
-1. `docker-compose down` on the currently-running stack
-2. `docker-compose up -d` on the target stack
-3. Poll `curl http://localhost/api/health` for up to 20s and echo `✅` only when the response contains `"status":"ok"`
-
-If the health check fails after 20s, the script exits non-zero and tails container logs so you can see what broke.
-
-A warm switch (both images already built) takes **~10–15 seconds**. A cold switch that includes a rebuild can take up to 90s.
+### Setup (before Inject)
+> *"Nokia UPF cluster, UPF-01 + UPF-02. Enhanced mobile broadband slice A, 842 enterprise subscribers. 15 ms SLA. Currently green at 11 ms."*
 
 ---
 
-## Pre-flight checklist (morning of any demo)
+### Act 1 (3 min) — UPF hero + churn drop
 
-Run these in order ~30 minutes before the briefing. Any failure — **stop and fix before the demo, not during**.
-
-- [ ] SSH to droplet: `ssh -i ~/.ssh/orca_deploy_key root@157.230.174.132`
-- [ ] **Warm the v1 image:** `cd /opt/orca && docker-compose build`
-- [ ] **Warm the v2 image:** `cd /opt/orca-v2 && docker-compose build`
-- [ ] **Prove the switch actually takes 10s each way — run a full cycle:**
-  ```
-  demo-v1 && demo-v2 && demo-v1 && demo-v2
-  ```
-  Each `✅ v{1|2} live` line should appear within ~15s of the one above it. Longer = either a cache miss or a daemon hiccup — investigate now.
-- [ ] Hit the dashboard in a browser — v2 should be live at this point. Verify:
-  - Topology renders with gNBs + UPFs visible
-  - Churn Forecast tab loads without errors
-  - Inject Fault button is present and not stuck in a loading state
-  - Security Watchlist shows the seeded `PE-02 unauthorized gNMI` entry
-- [ ] Dry-run Act 1 end-to-end: Inject Fault → slice-A QoS → watch proposal appear → approve → verify churn count drops
-- [ ] Dry-run Act 2 end-to-end: Inject Fault → transport congestion → approve workaround → verify TAC email appears in Email Outbox
-- [ ] Clear state: `curl -X POST http://localhost/api/demo/reset && curl -X POST http://localhost/api/demo/security-reset && curl -X DELETE http://localhost/api/emails && curl -X DELETE http://localhost/api/config-proposals`
-- [ ] Leave v2 running. Don't touch anything else until the PM briefing.
+1. `Inject Fault → "Slice-A QoS degradation on UPF-01 (Act 1)"`
+2. Narrate while the reasoning log streams (~10 s). Pause on the CONCLUDE: **"Dual root cause"**.
+3. Proposal card materializes. *(optional: click it to show three-column modal briefly.)*
+4. Click **Approve & Deploy**. Watch cascade.
+5. **Immediately switch to Churn Forecast tab.** Deliver the line:
+   > *"That's an operations action updating revenue risk in real time. Nobody else does this."*
+6. At-risk subscribers animates **847 → 438**. Revenue at risk **$4.1M → $2.9M**.
 
 ---
 
-## Troubleshooting mid-demo
+### Act 2 (3 min) — Nokia core is innocent
 
-### Symptom: after `demo-v2`, browser loads blank / stale content
+1. Switch back to Operations. Click **Reset**.
+2. `Inject Fault → "Transport congestion on LSP-1 (Act 2)"`
+3. Watch the reasoning log. On CONCLUDE **"Nokia core is innocent"** — pause two full seconds.
+   > *"Nokia TAC didn't burn a single hour on a fault that wasn't ours."*
+4. Proposal card materializes → **Approve & Deploy**.
+5. Email Outbox: amber-stripe TAC email appears. Click it.
+6. Read aloud key lines from the email body: **evidence package, three suggested resolutions**.
 
-The JS bundle hash changed between v1 and v2 and the browser is serving cached HTML referencing a dead asset. Hard refresh (Ctrl+Shift+R, Cmd+Shift+R on Mac).
+---
 
-### Symptom: container starts but `/api/health` never returns
+### Act 3 (30 s) — Security teaser
 
-Usually means the FastAPI app crashed at startup (missing env var, import error, port conflict). Check:
+1. Scroll **UP** in the reasoning log.
+2. Point to the red **ALERT** entry (pre-seeded from earlier).
+   > *"ORCA watches config state continuously. Often the first to see unauthorized changes. Not a security product — the earliest signal into one."*
+
+*(Optional: click the `Inject Security Event (Act 3)` button to add a fresh ALERT live.)*
+
+---
+
+## If something breaks mid-demo
+
+### Reasoning log stalls
+> *"The reasoning loop runs in the background. In production this is sub-second; in the demo harness there's some network latency."*
+
+Keep narrating.
+
+### Churn forecast doesn't animate
+> *"The churn count updates on a 30-second cycle. Let me keep going."*
+
+Move on — don't wait.
+
+### Fault injection button does nothing
+In a terminal:
 ```
-docker logs orca-v2_api_1 --tail 50
+/opt/orca-v2/scripts/demo-reset.sh
 ```
-Most common cause: the other stack didn't fully release port 80 before `up -d` tried to bind. Solution: `demo-v2` again — the `docker-compose down` at the top of the script will clean up the half-started container.
+Hard-refresh browser.
+> *"Demo harness hiccup — let me show you what you'd have seen."*
 
-### Symptom: during a v2 demo, I'm not sure if the behavior I'm seeing is a v2 regression or a shared bug
+Describe the flow verbally while recovering.
 
-Open a second SSH session and inspect v1 state side-by-side while v2 is serving:
-```
-# Session 1: v2 is running, serving port 80 from /opt/orca-v2
-# Session 2: poke at v1's source without touching the container
-cd /opt/orca && git log --oneline -5    # confirms v1 is still at v1.0.0
-grep -r "<the suspicious behavior>" /opt/orca/agent/   # is it present in v1 too?
-```
-Don't `docker-compose up` v1 unless you're ready to swap — that'll drop v2.
-
-### Rollback path (demo day worst case)
-
+### Everything is broken
+In a terminal:
 ```
 demo-v1
 ```
-That's the whole procedure. v1.0.0 is tagged, has a passing E2E suite, and has been running stably. If v2 is broken and there's no time to fix, run one command and pitch the transport demo.
+Falls back to v1.0.0 transport demo in ~5 s.
+> *"Let me show you the earlier version that's also running."*
 
 ---
 
-## GitHub PR hygiene
-
-Both stacks push PRs to the same `sireenmalik/orca` repo. To keep the PR list readable:
-
-- **v1 PRs** use branch prefix `cfg/R{…}-…` (existing convention) — no change.
-- **v2 PRs** use branch prefix `cfg/v2-{…}-…` and are auto-labelled `demo-v2` via the PR template checkbox.
-
-If you're scrolling the PR list and need to know which demo a PR came from, the branch name tells you at a glance, the label lets you filter.
+## Tabs to pre-load
+- **Operations** (main)
+- **Churn Forecast** (pre-open in a second tab, keep alive so the animation lands first-paint)
 
 ---
 
-## Tags on this branch
+## Post-briefing cleanup
+```
+python3 /opt/orca-v2/scripts/cleanup_prs.py --close-all-by-prefix v2/cfg/
+```
+Closes the PRs created during the live demo. Run this **after** screenshots if you want to keep any as audit examples.
 
-| Tag | Meaning |
-|---|---|
-| `v1.0.0` | Stable IP/MPLS demo (rollback point, always respected) |
-| `v2.0.0-infra` | Demo v2 workspace + switch scripts in place; no 5G code yet |
-| `v2.0.0-demo-5g` | 5G RAN demo verified end-to-end; set when section 8 polish is done |
+---
 
-Intermediate alpha / rc tags may appear during the build-up — those are checkpoints, not rollback targets.
+## Contacts if things explode
+- **Slack**: #orca-demo (Le)
+- **Droplet SSH**: `ssh -i ~/.ssh/orca_deploy_key root@157.230.174.132`
+- **GitHub repo**: `github.com/sireenmalik/orca` (private)

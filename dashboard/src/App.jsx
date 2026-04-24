@@ -591,6 +591,31 @@ const scenarioSubtypeStyle = {
   conclude:  { bg: "rgba(234,179,8,0.12)",  color: C.yellow, label: "CONCLUDE" },
   system:    { bg: "rgba(148,163,184,0.10)", color: C.muted, label: "SYSTEM" },
   recovered: { bg: "rgba(16,185,129,0.12)", color: C.green,  label: "✓ RECOVERED" },
+  // Act 3 security teaser — louder than reasoning subtypes by design.
+  alert:     { bg: "rgba(239,68,68,0.09)",  color: C.red,    label: "🔴 ALERT" },
+};
+
+// Pre-seeded Act 3 event — always present in the reasoning log, ~3h in
+// the past. Survives Reset. Detail block expands on click.
+const PRE_SEEDED_ALERT = {
+  type:      "scenario_log",
+  timestamp: new Date(Date.now() - 3 * 60 * 60 * 1000 - 17 * 60 * 1000).toISOString(),
+  data: {
+    seq:           -999,
+    subtype:       "alert",
+    content:       "Unauthorized gNMI config change attempt detected · target: PE-02 · source IP: 10.0.3.44 · invalid certificate · change blocked · connection terminated",
+    is_conclusion: false,
+    scenario_id:   "act3-security-teaser",
+    is_preseed:    true,
+    detail: {
+      source_ip:          "10.0.3.44",
+      target_device:      "PE-02",
+      attempted_change:   "gNMI SET on interface configuration",
+      certificate_status: "invalid (self-signed, not in trust store)",
+      action_taken:       "connection terminated, change blocked",
+      logged_to:          "SIEM (placeholder tag)",
+    },
+  },
 };
 
 const LogEntry = memo(function LogEntry({ entry }) {
@@ -600,6 +625,8 @@ const LogEntry = memo(function LogEntry({ entry }) {
   // conclude each get their own color dot + label.
   const isScenario  = entry.type === "scenario_log";
   const isConclude  = isScenario && !!data.is_conclusion;
+  const isAlert     = isScenario && data.subtype === "alert";
+  const [expanded, setExpanded] = useState(false);
   const s = isScenario
     ? (scenarioSubtypeStyle[data.subtype] || scenarioSubtypeStyle.analyze)
     : (logTypeStyle[entry.type] || logTypeStyle.status);
@@ -646,37 +673,52 @@ const LogEntry = memo(function LogEntry({ entry }) {
     return isNaN(d.getTime()) ? "" : d.toLocaleTimeString();
   })();
   const msgStr = typeof msg === "string" ? msg : "";
+  // Alerts: louder than reasoning — red border, tinted background, bigger
+  // pill, bold text; click to expand inline detail block.
   // Conclusions: larger font, heavier weight, subtle pulse on mount.
   // Everything else: standard 3-line clamp with hover tooltip.
+  const handleClick = isAlert && data.detail ? () => setExpanded(v => !v) : undefined;
   return (
-    <div style={{
-      padding: isConclude ? "11px 12px" : "8px 10px",
-      marginBottom: isConclude ? 6 : 4,
-      borderRadius: 6,
-      background: s.bg,
-      borderLeft: `${isConclude ? 3 : 2}px solid ${s.color}`,
-      animation: isConclude ? "orcaPulse 900ms ease-out" : undefined,
-    }}>
+    <div
+      onClick={handleClick}
+      style={{
+        padding: isAlert ? "11px 12px" : (isConclude ? "11px 12px" : "8px 10px"),
+        marginBottom: isAlert || isConclude ? 6 : 4,
+        borderRadius: 6,
+        background: s.bg,
+        borderLeft: `${isAlert ? 4 : (isConclude ? 3 : 2)}px solid ${s.color}`,
+        cursor: handleClick ? "pointer" : "default",
+        animation: isConclude ? "orcaPulse 900ms ease-out" : undefined,
+      }}
+    >
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 3 }}>
         <span style={{
-          fontSize: FS.logBadge, fontWeight: 700, padding: "1px 6px", borderRadius: 3,
-          background: s.color + "22", color: s.color, fontFamily: "monospace",
+          fontSize: isAlert ? "clamp(11px, 0.95vw, 13px)" : FS.logBadge,
+          fontWeight: 700,
+          padding: isAlert ? "2px 9px" : "1px 6px",
+          borderRadius: 3,
+          background: s.color + (isAlert ? "28" : "22"),
+          color: s.color, fontFamily: "monospace",
           letterSpacing: 0.5,
         }}>{s.label}</span>
         {ts && <span style={{ fontSize: FS.logTimestamp, color: C.muted, fontFamily: "monospace" }}>{ts}</span>}
+        {isAlert && data.detail && (
+          <span style={{ marginLeft: "auto", fontSize: FS.logTimestamp, color: C.muted, fontFamily: "monospace" }}>
+            {expanded ? "▾ hide details" : "▸ details"}
+          </span>
+        )}
       </div>
       <div
-        title={isConclude ? undefined : msgStr}
+        title={isConclude || isAlert ? undefined : msgStr}
         style={{
-          fontSize: isConclude ? "clamp(15px, 1.25vw, 18px)" : FS.logEntry,
-          fontWeight: isConclude ? 700 : 600,
+          fontSize: isConclude ? "clamp(15px, 1.25vw, 18px)" : (isAlert ? "clamp(14px, 1.15vw, 16px)" : FS.logEntry),
+          fontWeight: isConclude || isAlert ? 700 : 600,
           color: C.text,
           lineHeight: 1.45,
           fontFamily: entry.type === "tool_call" || entry.type === "tool_result" || entry.type === "git_command" ? "monospace" : "inherit",
-          // Conclusions show full text (no clamp) — they're the money moments
-          display: isConclude ? undefined : "-webkit-box",
-          WebkitLineClamp: isConclude ? undefined : 3,
-          WebkitBoxOrient: isConclude ? undefined : "vertical",
+          display: isConclude || isAlert ? undefined : "-webkit-box",
+          WebkitLineClamp: isConclude || isAlert ? undefined : 3,
+          WebkitBoxOrient: isConclude || isAlert ? undefined : "vertical",
           overflow: "hidden",
           wordBreak: "break-word",
           whiteSpace: "pre-wrap",
@@ -684,6 +726,22 @@ const LogEntry = memo(function LogEntry({ entry }) {
       >
         {msg}
       </div>
+      {isAlert && expanded && data.detail && (
+        <div style={{
+          marginTop: 8, padding: "8px 10px", borderRadius: 4,
+          background: "rgba(0,0,0,0.25)", border: `1px solid ${C.red}33`,
+          fontFamily: "monospace", fontSize: "clamp(11px, 0.95vw, 13px)",
+          lineHeight: 1.7, color: C.text,
+        }}>
+          {Object.entries(data.detail).map(([k, v]) => (
+            <div key={k}>
+              <span style={{ color: C.muted, letterSpacing: 0.5 }}>{k.replace(/_/g, " ")}:</span>
+              {" "}
+              <span style={{ color: k === "action_taken" ? C.red : C.text }}>{String(v)}</span>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 });
@@ -1064,7 +1122,6 @@ function EmailModal({ email, onClose, onSend }) {
 function ControlsBar({ onAnalyze, onAction, playingScenario }) {
   const [link, setLink] = useState("PE-01-PE-04");
   const [level, setLevel] = useState(92);
-  const [rogueActive, setRogueActive] = useState(false);
   const [scenarios, setScenarios] = useState([]);
   const links = ["PE-01-P-02","P-02-PE-03","PE-03-PE-04","PE-04-P-01","P-01-PE-02","PE-02-PE-01","PE-01-PE-04","P-02-P-01"];
 
@@ -1076,13 +1133,10 @@ function ControlsBar({ onAnalyze, onAction, playingScenario }) {
     return () => { cancel = true; };
   }, []);
 
-  const injectRogue = async () => {
-    await fetch(`${API}/api/demo/inject-rogue-config`, { method: "POST" });
-    setRogueActive(true);
-  };
-  const clearRogue = async () => {
-    await fetch(`${API}/api/demo/clear-rogue-config`, { method: "POST" });
-    setRogueActive(false);
+  // Act 3 security teaser — emits a red ALERT log entry. No state machine,
+  // no revert proposal (unlike the v1 rogue config flow). Just a log line.
+  const injectSecurityEvent = async () => {
+    await fetch(`${API}/api/v2/security/inject-event`, { method: "POST" });
   };
   const injectScenario = async (id) => {
     if (!id) return;
@@ -1135,8 +1189,12 @@ function ControlsBar({ onAnalyze, onAction, playingScenario }) {
       <button onClick={() => onAction("congestion", link, level)} style={{ padding: "4px 9px", borderRadius: 4, fontSize: 10, fontWeight: 600, cursor: "pointer", background: C.orange + "18", border: `1px solid ${C.orange}44`, color: C.orange, flexShrink: 0 }}>Congest</button>
       <button onClick={() => onAction("restore", link)} style={{ padding: "4px 9px", borderRadius: 4, fontSize: 10, fontWeight: 600, cursor: "pointer", background: C.green + "18", border: `1px solid ${C.green}44`, color: C.green, flexShrink: 0 }}>Restore</button>
       <div style={{ width: 1, height: 16, background: C.border, flexShrink: 0 }} />
-      <button onClick={rogueActive ? clearRogue : injectRogue} style={{ padding: "4px 9px", borderRadius: 4, fontSize: 10, fontWeight: 600, cursor: "pointer", background: rogueActive ? C.green + "18" : C.purple + "18", border: `1px solid ${rogueActive ? C.green + "44" : C.purple + "44"}`, color: rogueActive ? C.green : C.purple, flexShrink: 0 }}>
-        {rogueActive ? "🛡 Clear Rogue" : "🔓 Inject Rogue Config"}
+      <button
+        onClick={injectSecurityEvent}
+        title="Act 3 teaser — emits a red ALERT entry in the reasoning log"
+        style={{ padding: "4px 9px", borderRadius: 4, fontSize: 10, fontWeight: 600, cursor: "pointer", background: C.red + "18", border: `1px solid ${C.red}44`, color: C.red, flexShrink: 0 }}
+      >
+        🔓 Inject Security Event (Act 3)
       </button>
       <button onClick={onAnalyze} style={{ padding: "4px 9px", borderRadius: 4, fontSize: 10, fontWeight: 600, cursor: "pointer", background: C.blue + "18", border: `1px solid ${C.blue}44`, color: C.blue, flexShrink: 0, marginLeft: "auto" }}>🔍 Analyze</button>
     </div>
@@ -3500,7 +3558,9 @@ const TABS = [
 // ─── MAIN APP ─────────────────────────────────────────────────────────────────
 export default function App() {
   const [state, setState] = useState({ nodes: {}, links: {}, lsps: {}, alarms: [] });
-  const [events, setEvents] = useState([]);
+  // Events start with a single pre-seeded Act 3 ALERT (~3h ago). Reset
+  // filters back to just the pre-seed; WebSocket events accumulate on top.
+  const [events, setEvents] = useState([PRE_SEEDED_ALERT]);
   const [agentRunning, setAgentRunning] = useState(false);
   const [wsStatus, setWsStatus] = useState("connecting");
   const [activeTab, setActiveTab] = useState("ops");
@@ -3559,6 +3619,10 @@ export default function App() {
       // dedicated endpoint also refetches quickly).
       if (type === "reset") {
         try { await fetch(`${API}/api/proposals`, { method: "DELETE" }); } catch {}
+        // Clear the reasoning log too, but keep the pre-seeded Act 3 ALERT
+        // so the "earlier today" security event survives the reset for
+        // the demo narrative ("ORCA was watching the whole time").
+        setEvents([PRE_SEEDED_ALERT]);
       }
       setTimeout(async () => { try { const sr = await fetch(`${API}/api/state`); setState(await sr.json()); } catch {} }, 400);
     } catch {}
@@ -3597,6 +3661,16 @@ export default function App() {
           ))}
         </div>
         <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 10 }}>
+          <span
+            title="ORCA demonstration environment · not production data"
+            style={{
+              fontSize: "clamp(10px, 0.85vw, 12px)", fontWeight: 700, letterSpacing: 1.5,
+              padding: "2px 8px", borderRadius: 3,
+              border: `1px solid ${C.muted}66`, color: C.muted,
+              fontFamily: "monospace", background: "transparent",
+              cursor: "help",
+            }}
+          >DEMO</span>
           <div style={{ width: 7, height: 7, borderRadius: "50%", background: wsStatus === "connected" ? C.green : C.red, boxShadow: `0 0 6px ${wsStatus === "connected" ? C.green : C.red}55` }} />
           <span style={{ fontSize: 10, color: C.muted, fontFamily: "monospace" }}>v26 · {window.location.hostname}</span>
         </div>

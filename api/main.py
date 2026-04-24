@@ -233,6 +233,42 @@ async def v2_send_email(email_id: str, body: V2EmailAction = V2EmailAction()):
     })
     return e
 
+# ── v2 security teaser (Act 3) ────────────────────────────────────────────────
+# One lightweight endpoint that broadcasts an alert-type reasoning log entry.
+# Distinct from the v1 /api/demo/inject-rogue-config flow (which creates
+# alerts, evidence archives, revert proposals) — Act 3 is a teaser, not a
+# full security scenario.
+
+@app.post("/api/v2/security/inject-event")
+async def v2_inject_security_event():
+    """Emit one alert-type scenario_log entry. Used for the Act 3 teaser."""
+    content = (
+        "Unauthorized gNMI config change attempt detected · target: PE-02 "
+        "· source IP: 10.0.3.44 · invalid certificate · change blocked · "
+        "connection terminated"
+    )
+    detail = {
+        "source_ip":          "10.0.3.44",
+        "target_device":      "PE-02",
+        "attempted_change":   "gNMI SET on interface configuration",
+        "certificate_status": "invalid (self-signed, not in trust store)",
+        "action_taken":       "connection terminated, change blocked",
+        "logged_to":          "SIEM (placeholder tag)",
+    }
+    await manager.broadcast({
+        "type":      "scenario_log",
+        "timestamp": datetime.utcnow().isoformat(),
+        "data": {
+            "seq":           -99,
+            "subtype":       "alert",
+            "content":       content,
+            "is_conclusion": False,
+            "scenario_id":   "act3-security-teaser",
+            "detail":        detail,
+        },
+    })
+    return {"status": "emitted", "content": content}
+
 @app.post("/api/v2/emails/{email_id}/discard")
 async def v2_discard_email(email_id: str, body: V2EmailAction = V2EmailAction()):
     # Grab the subject before deletion for the log entry
