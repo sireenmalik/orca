@@ -604,11 +604,31 @@ const LogEntry = memo(function LogEntry({ entry }) {
     ? (scenarioSubtypeStyle[data.subtype] || scenarioSubtypeStyle.analyze)
     : (logTypeStyle[entry.type] || logTypeStyle.status);
 
-  // For scenarios we use data.content directly; for everything else keep
-  // the existing extraction logic.
+  // Scenario lifecycle events carry a small payload — format them as
+  // human lines rather than JSON-stringifying the blob into the UI.
+  const scenarioLifecycleMsg = (() => {
+    if (entry.type === "scenario_started") {
+      const label = data.short_label || data.name || data.id;
+      const dur = data.duration_seconds ? ` (${data.duration_seconds}s)` : "";
+      return label ? `Playing: ${label}${dur}` : "Scenario started";
+    }
+    if (entry.type === "scenario_complete") {
+      return data.id ? `Completed: ${data.id}` : "Scenario complete";
+    }
+    if (entry.type === "scenario_stopped") {
+      const r = data.reason ? ` — ${data.reason}` : "";
+      return `Stopped${r}`;
+    }
+    return null;
+  })();
+
+  // For scenario_log entries we use data.content directly; for lifecycle
+  // events we use the formatter above; for everything else keep the
+  // existing extraction logic.
   const msg = isScenario
     ? (data.content || "")
-    : (entry.message || entry.msg
+    : (scenarioLifecycleMsg
+       || entry.message || entry.msg
        || data.message || data.command || data.text
        || (data.tool && data.inputs ? `${data.tool}(\n${JSON.stringify(data.inputs, null, 2)})` : null)
        || (data.tool && data.result ? `${data.tool} → ${typeof data.result === "object" ? JSON.stringify(data.result) : data.result}` : null)
