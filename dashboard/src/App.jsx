@@ -504,23 +504,25 @@ function TopologyMap({ nodes, links, lsps, slices }) {
         .text(d.id);
     });
 
-    // 5. Legend — default bottom-right. If the panel is too narrow to fit
-    // the full legend (280px) plus a margin, shrink to 2 rows per slice
-    // (path on line 1, metadata on line 2). If the panel is really narrow
-    // (<400px), move the legend to bottom-left so it doesn't clip and
-    // reduce to 1 line per slice. If narrower than that, hide it entirely
-    // — the user is clearly probing the min size, not presenting.
+    // 5. Legend — default anchored to the right edge, vertically centered.
+    // The 5-column topology leaves empty space between UPF-01 (top-right)
+    // and UPF-02 (bottom-right), which is where the legend sits. If the
+    // panel is narrow (<560px) each slice reflows to 2 lines (path on
+    // line 1, meta on line 2). If the right side can't fit a 200px
+    // legend, we slide to the left edge (still vertically centered) so
+    // it never clips over the UPF nodes. Below 280px wide, hide.
     const sliceRows = Object.values(slices || {});
     if (sliceRows.length && W >= 280) {
-      const twoLine = W < 560;  // path + metadata stacked
+      const twoLine = W < 560;
       const lgWideRaw = twoLine ? Math.min(260, W - 28) : 300;
       const lgW = Math.max(200, Math.min(lgWideRaw, W - 28));
       const rowH = twoLine ? 32 : 22;
       const lgH = rowH * sliceRows.length + 18;
-      // Default bottom-right; if tight, bottom-left to stay visible
       const preferRight = (W - lgW - 14) > 10;
       const lgX = preferRight ? W - lgW - 14 : 14;
-      const lgY = H - lgH - 10;
+      // Vertically center (clamped so it never pokes above the top padding
+      // or below the bottom padding).
+      const lgY = Math.max(10, Math.min(H - lgH - 10, (H - lgH) / 2));
       const lg = svg.append("g");
       lg.append("rect")
         .attr("x", lgX).attr("y", lgY)
