@@ -168,15 +168,100 @@ def build_act2_early_email(proposal: dict) -> dict:
     }
 
 
-# Scenario id → early-email factory
+# Scenario id → early-email factory.
+# Act 2 is NOT in this map (it uses email-only handoff — see
+# ``build_act2_tac_handoff`` below — so there's no pre-approval
+# heads-up plus post-deploy resolution pair).
 EARLY_EMAIL_FACTORIES = {
-    "slice-a-qos-drift":                 build_act1_early_email,
-    "transport-congestion-upf-innocent": build_act2_early_email,
+    "slice-a-qos-drift": build_act1_early_email,
 }
 EARLY_SYSTEM_LOG = {
-    "slice-a-qos-drift":                 "Early notification sent to NOC · subject: ORCA diagnosis — Slice-A QoS degradation on UPF-01, proposal pending approval",
-    "transport-congestion-upf-innocent": "Early notification sent to transport TAC · subject: ORCA diagnosis — Transport congestion on PE-01 ↔ P-02, Nokia core cleared, workaround pending approval",
+    "slice-a-qos-drift": "Early notification sent to NOC · subject: ORCA diagnosis — Slice-A QoS degradation on UPF-01, proposal pending approval",
 }
+
+
+# ── Act 2 email-only handoff (single auto-sent email, no proposal) ──
+#
+# Replaces the Prompt-9 early + post-deploy pair for Act 2. Narrative is:
+# ORCA diagnoses, hands off to transport team, Nokia scope closed. No
+# Nokia-side action is taken, so there's no workaround paragraph and no
+# 'workaround rollback spec' attachment — the rollback spec is renamed
+# to transport-handoff-evidence-summary.yaml.
+
+def build_act2_tac_handoff(scenario_id: str = "transport-congestion-upf-innocent",
+                           proposal_id: str = None) -> dict:
+    otdr_ts = (datetime.utcnow()
+               .replace(hour=max(0, datetime.utcnow().hour - 9),
+                        minute=17, second=0, microsecond=0)
+               .strftime("%Y-%m-%d %H:%M:%S UTC"))
+
+    body = (
+        "ORCA has detected transport-layer congestion on the PE-01 ↔ P-02 link "
+        "affecting LSP-1, which carries slice-A enterprise traffic from gNB-1 "
+        "to UPF-01. Link utilization reached 93% with microbursts detected in "
+        "the last 60 seconds. Combined effect is driving p99 N3 latency on "
+        "UPF-01 toward the 15 ms slice-A SLA threshold.\n\n"
+
+        "Nokia core elements have been cleared as root cause. UPF-01 CPU, "
+        "memory pressure, PFCP association state, and QER enforcement all "
+        "healthy. SMF keepalive and AMF session count nominal. Core signaling "
+        "plane clean. The fault is upstream of UPF-01, on the transport path.\n\n"
+
+        "ORCA has taken no action on Nokia equipment. Transport congestion is "
+        "outside Nokia's scope. This email is the handoff package — evidence, "
+        "diagnosis, and suggested resolutions for your team's evaluation.\n\n"
+
+        f"Evidence package attached: 60-second telemetry window showing link "
+        f"utilization, LSP-1 path state, and slice-A N3 latency correlation. "
+        f"OTDR last clean reading: {otdr_ts}. Current link status: congested, "
+        f"no physical fault indicators.\n\n"
+
+        "Suggested resolutions for transport team evaluation:\n"
+        "  1. Short-term — reroute LSP-1 via P-01 → P-02 alternate path. "
+        "IGP metric adjustment on PE-01 to prefer the alternate. Estimated "
+        "deployment time: 5 minutes. No capex.\n"
+        "  2. Medium-term — rebalance traffic across PE-01 ↔ P-02 and "
+        "PE-01 ↔ P-01 by adjusting IGP metrics. Sustained improvement without "
+        "capacity addition. Estimated deployment: 30 minutes.\n"
+        "  3. Long-term — capacity augment on PE-01 ↔ P-02. 40G → 100G "
+        "upgrade. Estimated capex: $180K. Justification: trend analysis shows "
+        "this link approaching 80% average utilization over 30 days, "
+        "congestion episodes increasing in frequency.\n\n"
+
+        "Please advise on preferred resolution path. Nokia scope is closed on "
+        "this incident — no ORCA workaround will be applied. Contact: "
+        "orca@noc.operator.example.com for further evidence or telemetry queries.\n\n"
+
+        "— ORCA (on behalf of Nokia NetOps)"
+    )
+    ts_filename = datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
+    return {
+        "type":                   "external_tac",
+        "tag":                    "tac_handoff_only",
+        "to":                     ["transport-tac@operator.example.com"],
+        "cc":                     ["network-ops@operator.example.com"],
+        "from":                   FROM_ADDRESS,
+        "subject":                "Transport congestion on PE-01 ↔ P-02 — slice-A enterprise impact, Nokia core cleared",
+        "body":                   body,
+        "attachments": [
+            {"filename": f"transport-congestion-evidence-{ts_filename}.json",
+             "size_bytes": 24816, "mime_type": "application/json", "content_reference": "internal"},
+            {"filename": "lsp-1-path-state-60s-window.json",
+             "size_bytes": 9422,  "mime_type": "application/json", "content_reference": "internal"},
+            {"filename": "slice-a-n3-latency-correlation.csv",
+             "size_bytes": 4218,  "mime_type": "text/csv",         "content_reference": "internal"},
+            {"filename": "transport-handoff-evidence-summary.yaml",
+             "size_bytes": 1840,  "mime_type": "application/yaml", "content_reference": "internal"},
+        ],
+        "status":                 "sent",
+        "triggering_proposal_id": proposal_id,  # None for Act 2 — no proposal exists
+    }
+
+
+ACT2_HANDOFF_LOG = (
+    "TAC handoff email auto-sent to transport team · subject: Transport "
+    "congestion on PE-01 ↔ P-02 — slice-A enterprise impact, Nokia core cleared"
+)
 
 
 # ── Post-deploy resolution (drafted for human send) ──────────────────
@@ -351,14 +436,14 @@ def build_act2_email(proposal: dict) -> dict:
     }
 
 
-# Scenario id → email template factory
+# Scenario id → post-deploy email template factory. Act 2 is NOT here
+# — there's no deploy step to fire it after (see build_act2_tac_handoff
+# for the email-only flow).
 EMAIL_FACTORIES = {
-    "slice-a-qos-drift":                  build_act1_email,
-    "transport-congestion-upf-innocent":  build_act2_email,
+    "slice-a-qos-drift": build_act1_email,
 }
 
-# System log entry content used at creation time
+# System log entry content used at creation time on deploy.
 DRAFTED_SYSTEM_LOG = {
-    "slice-a-qos-drift":                  "NOC notification email drafted · 842 subscriber recovery logged for review",
-    "transport-congestion-upf-innocent":  "TAC handoff email drafted · transport team notified with evidence package + 3 suggested resolutions",
+    "slice-a-qos-drift": "NOC notification email drafted · 842 subscriber recovery logged for review",
 }

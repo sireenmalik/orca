@@ -145,11 +145,11 @@ SCENARIOS = {
             {"delay_ms": 200,  "type": "correlate","content": "Correlating: slice-A traffic from gNB-1 traverses LSP-1. LSP-1 congestion on PE-01 ↔ P-02 directly explains p99 climb at UPF-01."},
             {"delay_ms": 2500, "type": "conclude", "is_conclusion": True,
              "content": "Diagnosis complete. Nokia core is innocent. Root cause is transport-layer congestion on PE-01 ↔ P-02, upstream of UPF-01."},
-            {"delay_ms": 400,  "type": "decide",   "content": "ORCA has read-only access to transport. No direct fix available at transport layer. Composing two parallel responses."},
-            {"delay_ms": 300,  "type": "decide",   "content": "Response 1 (Nokia-domain workaround): migrate slice-A sessions off LSP-1's congested path. PFCP session modification to re-anchor sessions via alternate path."},
-            {"delay_ms": 300,  "type": "decide",   "content": "Response 2 (transport handoff): drafting TAC email to operator transport team with evidence package and three suggested transport-side resolutions."},
+            {"delay_ms": 400,  "type": "decide",   "content": "ORCA has read-only access to transport. No Nokia-side action is appropriate — the fault is not in Nokia scope."},
+            {"delay_ms": 300,  "type": "decide",   "content": "ORCA has no action authority over transport. Fault is upstream of Nokia scope. Composing handoff package for transport team."},
+            {"delay_ms": 300,  "type": "decide",   "content": "Drafting TAC email to operator transport team with evidence package and three suggested transport-side resolutions."},
             {"delay_ms": 500,  "type": "conclude", "is_conclusion": True,
-             "content": "Workaround proposal validated (6/6 gates). TAC email drafted. Both ready for human review."},
+             "content": "Handoff package complete. TAC email auto-sent to transport team with evidence and three suggested resolutions. Nokia scope closed."},
         ],
     },
 }
@@ -440,11 +440,51 @@ async def _play(scenario: dict, broadcast, adapter) -> None:
         })
 
     try:
-        # ── Auto-create the scenario's config proposal ────────────────
+        # ── Act 2: email-only handoff (no proposal, no approval, no
+        # deploy). After the final conclude line fires, immediately
+        # auto-send the TAC email and emit one system log entry. Nokia
+        # scope closes here. Everything below this branch is the
+        # proposal-flow path used by Act 1.
+        if scenario["id"] == "transport-congestion-upf-innocent":
+            await asyncio.sleep(0.4)
+            from agent import v2_emails
+            handoff = v2_emails.create(
+                v2_emails.build_act2_tac_handoff(scenario_id=scenario["id"])
+            )
+            await broadcast({
+                "type":      "email_created",
+                "timestamp": datetime.utcnow().isoformat(),
+                "data": {
+                    "id":      handoff["id"],
+                    "type":    handoff["type"],
+                    "subject": handoff["subject"],
+                    "tag":     handoff.get("tag"),
+                    "status":  handoff.get("status"),
+                },
+            })
+            await broadcast({
+                "type":      "scenario_log",
+                "timestamp": datetime.utcnow().isoformat(),
+                "data": {
+                    "seq":           -2,
+                    "subtype":       "system",
+                    "content":       v2_emails.ACT2_HANDOFF_LOG,
+                    "is_conclusion": False,
+                    "scenario_id":   scenario["id"],
+                    "email_id":      handoff["id"],
+                },
+            })
+            # fall through to the state_patches + scenario_complete block
+            # below via the `pass` sentinel instead of returning — the
+            # scenario still needs to broadcast its completion.
+            template = None
+        else:
+            template = SCENARIO_PROPOSAL_TEMPLATES.get(scenario["id"])
+
+        # ── Auto-create the scenario's config proposal (Act 1 path) ──
         # 400ms breath after the final conclusion line so the audience's
         # eye can land on it before the proposal card slides in. This is
         # THE demo money-shot beat — do not remove without a UX review.
-        template = SCENARIO_PROPOSAL_TEMPLATES.get(scenario["id"])
         if template:
             await asyncio.sleep(0.4)
             # Late-import to avoid a circular import at module load time.
