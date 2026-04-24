@@ -1,0 +1,34 @@
+# ORCA v2 config proposal — v2-cfg-1776990624570
+# Auto-generated on approve. Branch: v2/cfg/smoke-test-proposal-20260424-003050
+
+title: "Smoke test proposal"
+reason: |
+  Smoke test — verifying proposal workflow renders correctly end-to-end.
+projected_impact: |
+  No production impact — this is a test proposal.
+triggering_incident_id: ""
+validation_gates:
+  - name: "Syntax"
+    status: "pass"
+    detail: "YAML well-formed, schema-valid"
+  - name: "Semantic"
+    status: "pass"
+    detail: "Referenced nodes and slices exist, no dangling references"
+  - name: "Mission · utilization"
+    status: "pass"
+    detail: "All link utilization stays under 90% after applying change"
+  - name: "Mission · slice SLA"
+    status: "pass"
+    detail: "Slice SLA thresholds preserved for all affected slices"
+  - name: "Digital twin"
+    status: "pass"
+    detail: "Candidate config applied to twin, 60s traffic simulation passed"
+  - name: "Policy"
+    status: "pass"
+    detail: "Change respects approved intent policies (no manual overrides)"
+diff: |
+  router isis 1
+    interface to-test
+-     metric 100
++     metric 80
+    !
