@@ -3022,15 +3022,28 @@ function ChurnTab({ events }) {
     } catch {}
   }, []);
 
-  // Fetch on mount + every 10s + on churn_updated event
+  // Fetch on mount + every 2s + on any churn_updated event
   useEffect(() => {
     fetchChurn();
-    const t = setInterval(fetchChurn, 10000);
+    const t = setInterval(fetchChurn, 2000);
     return () => clearInterval(t);
   }, [fetchChurn]);
+  // Watch for churn_updated anywhere in the tail of events, not just the
+  // very last one — other events (pr_opened, scenario_log) fire right
+  // after churn_updated and would mask it if we only checked events[-1].
+  const lastChurnTsRef = useRef(null);
   useEffect(() => {
-    const last = events[events.length - 1];
-    if (last?.type === "churn_updated") fetchChurn();
+    for (let i = events.length - 1; i >= Math.max(0, events.length - 10); i--) {
+      const ev = events[i];
+      if (ev?.type === "churn_updated") {
+        const ts = ev.timestamp || ev.data?.transitioned_at;
+        if (ts !== lastChurnTsRef.current) {
+          lastChurnTsRef.current = ts;
+          fetchChurn();
+        }
+        break;
+      }
+    }
   }, [events, fetchChurn]);
 
   // Animation / snap decision whenever churn state changes.
