@@ -562,58 +562,97 @@ function TopologyMap({ nodes, links, lsps, slices }) {
 
 // ─── LOG TYPE STYLES ──────────────────────────────────────────────────────────
 const logTypeStyle = {
-  alert: { bg: "#ef444418", color: C.red, label: "ALERT" },
-  reasoning: { bg: "#8b5cf618", color: C.purple, label: "THINK" },
-  tool_call: { bg: "#06b6d418", color: C.blue, label: "TOOL" },
-  tool_result: { bg: "#10b98118", color: C.green, label: "RESULT" },
-  notification: { bg: "#eab30818", color: C.yellow, label: "NOTIFY" },
-  status: { bg: "#10b98118", color: C.green, label: "STATUS" },
-  agent_status: { bg: "#10b98118", color: C.green, label: "STATUS" },
-  git_command: { bg: "#06b6d418", color: C.blue, label: "GIT" },
-  pr_opened: { bg: "#8b5cf618", color: C.purple, label: "PR" },
-  netconf_push: { bg: "rgba(16,185,129,0.10)", color: C.green, label: "NETCONF" },
-  state_update: { bg: "rgba(255,255,255,0.02)", color: C.muted, label: "STATE" },
+  alert:              { bg: "#ef444418", color: C.red,    label: "ALERT" },
+  reasoning:          { bg: "#8b5cf618", color: C.purple, label: "THINK" },
+  tool_call:          { bg: "#06b6d418", color: C.blue,   label: "TOOL" },
+  tool_result:        { bg: "#10b98118", color: C.green,  label: "RESULT" },
+  notification:       { bg: "#eab30818", color: C.yellow, label: "NOTIFY" },
+  status:             { bg: "#10b98118", color: C.green,  label: "STATUS" },
+  agent_status:       { bg: "#10b98118", color: C.green,  label: "STATUS" },
+  git_command:        { bg: "#06b6d418", color: C.blue,   label: "GIT" },
+  pr_opened:          { bg: "#8b5cf618", color: C.purple, label: "PR" },
+  netconf_push:       { bg: "rgba(16,185,129,0.10)", color: C.green, label: "NETCONF" },
+  state_update:       { bg: "rgba(255,255,255,0.02)", color: C.muted, label: "STATE" },
+  scenario_started:   { bg: "#06b6d418", color: C.blue,   label: "▶ SCENARIO" },
+  scenario_complete:  { bg: "#10b98118", color: C.green,  label: "✓ SCENARIO" },
+  scenario_stopped:   { bg: "#64748b18", color: C.muted,  label: "■ STOPPED" },
+};
+
+// v2 scenario playback — five reasoning-log subtypes, each with its own
+// colored indicator dot + label. `conclude` is rendered bolder/larger and
+// gets a one-time pulse on mount. Matches the scenario script vocabulary.
+const scenarioSubtypeStyle = {
+  detect:    { bg: "rgba(6,182,212,0.08)",  color: C.blue,   label: "DETECT" },
+  analyze:   { bg: "rgba(139,92,246,0.08)", color: C.purple, label: "ANALYZE" },
+  correlate: { bg: "rgba(249,115,22,0.10)", color: C.orange, label: "CORRELATE" },
+  decide:    { bg: "rgba(16,185,129,0.08)", color: C.green,  label: "DECIDE" },
+  conclude:  { bg: "rgba(234,179,8,0.12)",  color: C.yellow, label: "CONCLUDE" },
 };
 
 const LogEntry = memo(function LogEntry({ entry }) {
-  const s = logTypeStyle[entry.type] || logTypeStyle.status;
-  // Agent wraps content in entry.data — extract the most useful field
   const data = entry.data || {};
-  const msg = entry.message || entry.msg
-    || data.message || data.command || data.text
-    || (data.tool && data.inputs ? `${data.tool}(\n${JSON.stringify(data.inputs, null, 2)})` : null)
-    || (data.tool && data.result ? `${data.tool} → ${typeof data.result === "object" ? JSON.stringify(data.result) : data.result}` : null)
-    || (typeof data === "string" ? data : JSON.stringify(data));
+  // Scripted scenario entries ride the same bus but pick their style from
+  // data.subtype instead of entry.type so detect/analyze/correlate/decide/
+  // conclude each get their own color dot + label.
+  const isScenario  = entry.type === "scenario_log";
+  const isConclude  = isScenario && !!data.is_conclusion;
+  const s = isScenario
+    ? (scenarioSubtypeStyle[data.subtype] || scenarioSubtypeStyle.analyze)
+    : (logTypeStyle[entry.type] || logTypeStyle.status);
+
+  // For scenarios we use data.content directly; for everything else keep
+  // the existing extraction logic.
+  const msg = isScenario
+    ? (data.content || "")
+    : (entry.message || entry.msg
+       || data.message || data.command || data.text
+       || (data.tool && data.inputs ? `${data.tool}(\n${JSON.stringify(data.inputs, null, 2)})` : null)
+       || (data.tool && data.result ? `${data.tool} → ${typeof data.result === "object" ? JSON.stringify(data.result) : data.result}` : null)
+       || (typeof data === "string" ? data : JSON.stringify(data)));
+
   const ts = (() => {
     if (!entry.timestamp) return "";
     const t = entry.timestamp;
-    // Already a formatted string
-    if (typeof t === "string" && isNaN(Number(t))) return t;
-    // Unix epoch in seconds
+    if (typeof t === "string" && isNaN(Number(t))) {
+      try { const d = new Date(t); if (!isNaN(d.getTime())) return d.toLocaleTimeString(); } catch {}
+      return t;
+    }
     const ms = Number(t) < 1e10 ? Number(t) * 1000 : Number(t);
     const d = new Date(ms);
     return isNaN(d.getTime()) ? "" : d.toLocaleTimeString();
   })();
   const msgStr = typeof msg === "string" ? msg : "";
+  // Conclusions: larger font, heavier weight, subtle pulse on mount.
+  // Everything else: standard 3-line clamp with hover tooltip.
   return (
-    <div style={{ padding: "8px 10px", marginBottom: 4, borderRadius: 6, background: s.bg, borderLeft: `2px solid ${s.color}` }}>
+    <div style={{
+      padding: isConclude ? "11px 12px" : "8px 10px",
+      marginBottom: isConclude ? 6 : 4,
+      borderRadius: 6,
+      background: s.bg,
+      borderLeft: `${isConclude ? 3 : 2}px solid ${s.color}`,
+      animation: isConclude ? "orcaPulse 900ms ease-out" : undefined,
+    }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 3 }}>
-        <span style={{ fontSize: FS.logBadge, fontWeight: 700, padding: "1px 6px", borderRadius: 3, background: s.color + "22", color: s.color, fontFamily: "monospace" }}>{s.label}</span>
+        <span style={{
+          fontSize: FS.logBadge, fontWeight: 700, padding: "1px 6px", borderRadius: 3,
+          background: s.color + "22", color: s.color, fontFamily: "monospace",
+          letterSpacing: 0.5,
+        }}>{s.label}</span>
         {ts && <span style={{ fontSize: FS.logTimestamp, color: C.muted, fontFamily: "monospace" }}>{ts}</span>}
       </div>
-      {/* Line-clamp at 3 lines; full text on hover via title attr. Word-break
-          keeps long tool-result strings from horizontal-scrolling the panel. */}
       <div
-        title={msgStr}
+        title={isConclude ? undefined : msgStr}
         style={{
-          fontSize: FS.logEntry,
-          fontWeight: 600,
+          fontSize: isConclude ? "clamp(15px, 1.25vw, 18px)" : FS.logEntry,
+          fontWeight: isConclude ? 700 : 600,
           color: C.text,
           lineHeight: 1.45,
           fontFamily: entry.type === "tool_call" || entry.type === "tool_result" || entry.type === "git_command" ? "monospace" : "inherit",
-          display: "-webkit-box",
-          WebkitLineClamp: 3,
-          WebkitBoxOrient: "vertical",
+          // Conclusions show full text (no clamp) — they're the money moments
+          display: isConclude ? undefined : "-webkit-box",
+          WebkitLineClamp: isConclude ? undefined : 3,
+          WebkitBoxOrient: isConclude ? undefined : "vertical",
           overflow: "hidden",
           wordBreak: "break-word",
           whiteSpace: "pre-wrap",
@@ -634,7 +673,7 @@ function AgentLogPanel({ events, onOpenModal }) {
   const filtered = useMemo(() => {
     const meaningful = events.filter(e => e.type !== "state_update");
     if (filter === "all") return meaningful;
-    const map = { THINK: ["reasoning", "agent_thinking"], TOOL: ["tool_call", "tool_result", "git_command", "pr_opened"], ALERT: ["alert"] };
+    const map = { THINK: ["reasoning", "agent_thinking", "scenario_log"], TOOL: ["tool_call", "tool_result", "git_command", "pr_opened"], ALERT: ["alert"] };
     return meaningful.filter(e => (map[filter] || []).includes(e.type));
   }, [events, filter]);
 
@@ -678,7 +717,7 @@ function AgentLogModal({ events, onClose }) {
     const meaningful = events.filter(e => e.type !== "state_update");
     let r = meaningful;
     if (filter !== "all") {
-      const map = { THINK: ["reasoning", "agent_thinking"], TOOL: ["tool_call", "tool_result", "git_command", "pr_opened"], ALERT: ["alert"] };
+      const map = { THINK: ["reasoning", "agent_thinking", "scenario_log"], TOOL: ["tool_call", "tool_result", "git_command", "pr_opened"], ALERT: ["alert"] };
       r = r.filter(e => (map[filter] || []).includes(e.type));
     }
     if (search) r = r.filter(e => (e.message || e.msg || "").toLowerCase().includes(search.toLowerCase()));
@@ -998,11 +1037,20 @@ function EmailModal({ email, onClose, onSend }) {
 }
 
 // ─── CONTROLS SLIM BAR ────────────────────────────────────────────────────────
-function ControlsBar({ onAnalyze, onAction }) {
+function ControlsBar({ onAnalyze, onAction, playingScenario }) {
   const [link, setLink] = useState("PE-01-PE-04");
   const [level, setLevel] = useState(92);
   const [rogueActive, setRogueActive] = useState(false);
+  const [scenarios, setScenarios] = useState([]);
   const links = ["PE-01-P-02","P-02-PE-03","PE-03-PE-04","PE-04-P-01","P-01-PE-02","PE-02-PE-01","PE-01-PE-04","P-02-P-01"];
+
+  useEffect(() => {
+    let cancel = false;
+    fetch(`${API}/api/scenarios`).then(r => r.json()).then(d => {
+      if (!cancel) setScenarios(d.scenarios || []);
+    }).catch(() => {});
+    return () => { cancel = true; };
+  }, []);
 
   const injectRogue = async () => {
     await fetch(`${API}/api/demo/inject-rogue-config`, { method: "POST" });
@@ -1012,20 +1060,56 @@ function ControlsBar({ onAnalyze, onAction }) {
     await fetch(`${API}/api/demo/clear-rogue-config`, { method: "POST" });
     setRogueActive(false);
   };
+  const injectScenario = async (id) => {
+    if (!id) return;
+    await fetch(`${API}/api/scenarios/${id}/inject`, { method: "POST" });
+  };
+  const resetScenarios = async () => {
+    await fetch(`${API}/api/scenarios/reset`, { method: "POST" });
+  };
+
+  const activeScenario = scenarios.find(s => s.id === playingScenario);
 
   return (
-    <div style={{ background: C.panel, border: `1px solid ${C.border}`, borderRadius: 7, padding: "7px 12px", display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
+    <div style={{ background: C.panel, border: `1px solid ${C.border}`, borderRadius: 7, padding: "7px 12px", display: "flex", alignItems: "center", gap: 10, flexShrink: 0, flexWrap: "wrap" }}>
+      {/* ── v2 demo scenarios (primary controls) ── */}
+      <span style={{ fontSize: 9, fontWeight: 700, color: C.muted, letterSpacing: 1, textTransform: "uppercase", flexShrink: 0 }}>Scenario</span>
+      <select
+        value=""
+        onChange={e => { injectScenario(e.target.value); e.target.value = ""; }}
+        disabled={!!playingScenario}
+        style={{ padding: "3px 6px", background: "rgba(255,255,255,0.04)", border: `1px solid ${C.border}`, borderRadius: 4, color: C.text, fontSize: 11, maxWidth: 260 }}
+      >
+        <option value="">{playingScenario ? "(scenario running)" : "— Inject Fault —"}</option>
+        {scenarios.map(s => <option key={s.id} value={s.id}>{s.short_label}</option>)}
+      </select>
+      <button
+        onClick={resetScenarios}
+        style={{ padding: "4px 9px", borderRadius: 4, fontSize: 10, fontWeight: 600, cursor: "pointer", background: "rgba(255,255,255,0.04)", border: `1px solid ${C.border}`, color: C.muted, flexShrink: 0 }}
+      >Reset</button>
+      {activeScenario && (
+        <span style={{
+          fontSize: 11, fontWeight: 700, padding: "3px 10px", borderRadius: 12,
+          background: C.blue + "22", color: C.blue, fontFamily: "monospace",
+          display: "inline-flex", alignItems: "center", gap: 6,
+        }}>
+          <span style={{ width: 7, height: 7, borderRadius: "50%", background: C.blue, animation: "orcaPulse 1400ms ease-out infinite" }} />
+          Playing: {activeScenario.short_label}
+        </span>
+      )}
+
+      <div style={{ width: 1, height: 16, background: C.border, flexShrink: 0 }} />
+
+      {/* ── v1 link fault controls (preserved for Act 3 security teaser) ── */}
       <span style={{ fontSize: 9, fontWeight: 700, color: C.muted, letterSpacing: 1, textTransform: "uppercase", flexShrink: 0 }}>Link</span>
       <select value={link} onChange={e => setLink(e.target.value)} style={{ padding: "3px 6px", background: "rgba(255,255,255,0.04)", border: `1px solid ${C.border}`, borderRadius: 4, color: C.text, fontSize: 11 }}>
         {links.map(l => <option key={l} value={l}>{l}</option>)}
       </select>
       <input type="range" min={50} max={99} value={level} onChange={e => setLevel(Number(e.target.value))} style={{ width: 80 }} />
       <span style={{ fontSize: 10, color: C.muted, fontFamily: "monospace", width: 28, flexShrink: 0 }}>{level}%</span>
-      <div style={{ width: 1, height: 16, background: C.border, flexShrink: 0 }} />
-      <button onClick={() => onAction("failure", link)} style={{ padding: "4px 9px", borderRadius: 4, fontSize: 10, fontWeight: 600, cursor: "pointer", background: C.red + "18", border: `1px solid ${C.red}44`, color: C.red, flexShrink: 0 }}>Inject Fault</button>
+      <button onClick={() => onAction("failure", link)} style={{ padding: "4px 9px", borderRadius: 4, fontSize: 10, fontWeight: 600, cursor: "pointer", background: C.red + "18", border: `1px solid ${C.red}44`, color: C.red, flexShrink: 0 }}>Fault</button>
       <button onClick={() => onAction("congestion", link, level)} style={{ padding: "4px 9px", borderRadius: 4, fontSize: 10, fontWeight: 600, cursor: "pointer", background: C.orange + "18", border: `1px solid ${C.orange}44`, color: C.orange, flexShrink: 0 }}>Congest</button>
       <button onClick={() => onAction("restore", link)} style={{ padding: "4px 9px", borderRadius: 4, fontSize: 10, fontWeight: 600, cursor: "pointer", background: C.green + "18", border: `1px solid ${C.green}44`, color: C.green, flexShrink: 0 }}>Restore</button>
-      <button onClick={() => onAction("reset")} style={{ padding: "4px 9px", borderRadius: 4, fontSize: 10, fontWeight: 600, cursor: "pointer", background: "rgba(255,255,255,0.04)", border: `1px solid ${C.border}`, color: C.muted, flexShrink: 0 }}>Reset</button>
       <div style={{ width: 1, height: 16, background: C.border, flexShrink: 0 }} />
       <button onClick={rogueActive ? clearRogue : injectRogue} style={{ padding: "4px 9px", borderRadius: 4, fontSize: 10, fontWeight: 600, cursor: "pointer", background: rogueActive ? C.green + "18" : C.purple + "18", border: `1px solid ${rogueActive ? C.green + "44" : C.purple + "44"}`, color: rogueActive ? C.green : C.purple, flexShrink: 0 }}>
         {rogueActive ? "🛡 Clear Rogue" : "🔓 Inject Rogue Config"}
@@ -1691,7 +1775,7 @@ function OperationsTab({ state, events, agentRunning, wsStatus, onToggleAgent, o
           {/* Controls bar — slim, still inside a Split so operator can
               collapse it for more topology height if they want */}
           <div style={{ height: "100%", display: "flex", alignItems: "center" }}>
-            <ControlsBar onAnalyze={onAnalyze} onAction={onAction} />
+            <ControlsBar onAnalyze={onAnalyze} onAction={onAction} playingScenario={state.playing_scenario || null} />
           </div>
           {/* Bottom row: proposals on left, alarms+emails on right */}
           <Split

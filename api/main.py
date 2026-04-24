@@ -13,6 +13,7 @@ from agent.te_agent import ORCAAgent, get_config_proposals, update_proposal_stat
 from agent.adapter import ContainerlabAdapter
 from agent.notifications import send_email, build_tac_email, get_pending_emails, clear_emails
 from agent import v2_proposals
+from agent import scenarios as v2_scenarios
 
 adapter = ContainerlabAdapter()
 agent = ORCAAgent(adapter=adapter)
@@ -74,8 +75,12 @@ async def get_state():
         "nodes": state.nodes, "links": state.links,
         "lsps": state.lsps, "alarms": state.alarms,
         # v2 demo additions — RAN/UPF topology layer
-        "slices":   state.slices,
-        "sessions": state.sessions,
+        "slices":         state.slices,
+        "sessions":       state.sessions,
+        "qer_state":      state.qer_state,
+        "slice_metrics":  state.slice_metrics,
+        "link_flags":     state.link_flags,
+        "playing_scenario": v2_scenarios.is_playing(),
     }
 
 # ── Agent ─────────────────────────────────────────────────────────────────────
@@ -114,16 +119,58 @@ async def restore_link(req: FaultRequest):
     asyncio.create_task(_broadcast_state())
     return result
 
-@app.post("/api/demo/reset")
-async def reset_network():
+def _reset_to_baseline():
+    """Factory-reset the adapter. Used by /api/demo/reset and as the
+    baseline-restore callback passed into v2_scenarios.inject()/stop()."""
     global adapter
     adapter = ContainerlabAdapter()
     agent.adapter = adapter
-    # v2 demo reset also clears the v2 proposal list so repeat Act 1 / Act 2
-    # runs in rehearsal don't show stale cards from the previous take.
+
+@app.post("/api/demo/reset")
+async def reset_network():
+    # Halt any in-flight scenario playback first so new demo takes start clean.
+    await v2_scenarios.stop(manager.broadcast, reset_baseline_if_requested=False,
+                             reset_baseline=_reset_to_baseline)
+    _reset_to_baseline()
     v2_proposals.clear_proposals()
     asyncio.create_task(_broadcast_state())
     return {"status": "reset", "message": "Network reset to baseline"}
+
+# ── v2 scenario playback endpoints ────────────────────────────────────────────
+@app.get("/api/scenarios")
+async def list_scenarios():
+    return {"scenarios": v2_scenarios.list_scenarios(), "playing": v2_scenarios.is_playing()}
+
+@app.post("/api/scenarios/{scenario_id}/inject")
+async def inject_scenario(scenario_id: str):
+    # Each inject uses the CURRENT module-level adapter — ``_reset_to_baseline``
+    # rebinds it via ``global adapter``. We read adapter on entry so
+    # concurrent injects see a consistent reference.
+    return await v2_scenarios.inject(
+        scenario_id,
+        broadcast=manager.broadcast,
+        adapter=adapter,
+        reset_baseline=_reset_to_baseline,
+    )
+
+@app.post("/api/scenarios/stop")
+async def stop_scenarios():
+    return await v2_scenarios.stop(
+        broadcast=manager.broadcast,
+        reset_baseline_if_requested=False,
+        reset_baseline=_reset_to_baseline,
+    )
+
+@app.post("/api/scenarios/reset")
+async def reset_scenarios():
+    r = await v2_scenarios.stop(
+        broadcast=manager.broadcast,
+        reset_baseline_if_requested=True,
+        reset_baseline=_reset_to_baseline,
+    )
+    v2_proposals.clear_proposals()
+    asyncio.create_task(_broadcast_state())
+    return {**r, "state": "baseline"}
 
 # ── v2 Config Proposals workflow ──────────────────────────────────────────────
 # New endpoints at /api/proposals (distinct from the v1 /api/config-proposals
@@ -178,7 +225,10 @@ async def _broadcast_state():
     await manager.broadcast({
         "type": "state_update", "timestamp": datetime.utcnow().isoformat(),
         "data": {"nodes": state.nodes, "links": state.links, "lsps": state.lsps,
-                 "alarms": state.alarms, "slices": state.slices, "sessions": state.sessions}
+                 "alarms": state.alarms, "slices": state.slices, "sessions": state.sessions,
+                 "qer_state": state.qer_state, "slice_metrics": state.slice_metrics,
+                 "link_flags": state.link_flags,
+                 "playing_scenario": v2_scenarios.is_playing()},
     })
 
 # ── Email queue ───────────────────────────────────────────────────────────────

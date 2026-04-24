@@ -56,6 +56,9 @@ class NetworkState:
     alarms: list
     slices: dict = field(default_factory=dict)
     sessions: dict = field(default_factory=dict)
+    qer_state: dict = field(default_factory=dict)
+    slice_metrics: dict = field(default_factory=dict)
+    link_flags: dict = field(default_factory=dict)
 
 
 class NetworkAdapter(ABC):
@@ -260,6 +263,12 @@ class ContainerlabAdapter(NetworkAdapter):
             }
             for upf, data in self.SESSIONS_BASELINE.items()
         }
+        # v2 scenario playback — populated by scenarios.apply_scenario_patch
+        # Sparse dicts; when empty, the frontend treats them as "no signal
+        # on this dimension" and the baseline KPIs render.
+        self._qer_state:     dict = {}   # {upf: {slice: {intent_gbr_mbps, enforced_mbps, status}}}
+        self._slice_metrics: dict = {}   # {upf: {slice_key: {p99_ms, ...}}} or LSP-side
+        self._link_flags:    dict = {}   # {link_id: {microbursts: bool, ...}}
 
     def inject_rogue_config(self, node: str = "PE-01") -> dict:
         """Simulate an unauthorized config change pushed directly to a router."""
@@ -352,6 +361,90 @@ class ContainerlabAdapter(NetworkAdapter):
     def get_slices(self) -> dict:
         """Current 5G slice state — subscribers, cohort, SLA, current latency."""
         return {sid: dict(s) for sid, s in self._slices.items()}
+
+    def get_qer_state(self) -> dict:
+        """QER enforcement state per UPF, per slice. Populated by v2 scenarios."""
+        return {upf: {s: dict(v) for s, v in per_slice.items()}
+                for upf, per_slice in self._qer_state.items()}
+
+    def get_slice_metrics(self) -> dict:
+        """Per-UPF / per-LSP metrics (p99 latency etc). Populated by scenarios."""
+        return {k: (dict(v) if isinstance(v, dict) else v)
+                for k, v in self._slice_metrics.items()}
+
+    def get_link_flags(self) -> dict:
+        """Per-link boolean flags (microbursts etc). Populated by scenarios."""
+        return {lid: dict(v) for lid, v in self._link_flags.items()}
+
+    # ── v2 scenario patch applier — dotted-path mutator ────────────────
+    # Scenarios target paths like "sessions.UPF-01.by_slice.slice-A" or
+    # "qer_state.UPF-01.slice-A" or "alarms". This keeps the scenario
+    # file declarative without teaching it about adapter internals.
+    _SCENARIO_ROOTS = {
+        "sessions":   "_sessions",
+        "qer_state":  "_qer_state",
+        "metrics":    "_slice_metrics",
+        "link_flags": "_link_flags",
+        "link_util":  "_base_util",   # scenarios set baseline util, dynamic layer still adds noise
+        "alarms":     "_alarms",
+    }
+
+    def apply_scenario_patch(self, target: str, op: str, value) -> None:
+        """Apply a single state mutation. ``target`` is a dotted path
+        rooted at one of _SCENARIO_ROOTS. ``op`` is one of 'set',
+        'increment', 'append'. ``append`` only works on list targets
+        (currently only 'alarms').
+
+        Creates intermediate dicts as needed so scenarios can introduce
+        new per-UPF or per-slice keys without a schema migration.
+        """
+        parts = target.split(".")
+        if not parts:
+            return
+        root_name = self._SCENARIO_ROOTS.get(parts[0])
+        if not root_name:
+            return
+        container = getattr(self, root_name)
+
+        # alarms: list with special-case append-of-Alarm handling
+        if parts[0] == "alarms":
+            if op == "append" and isinstance(value, dict):
+                alarm = Alarm(
+                    id          = value.get("id", f"scenario-{int(time.time()*1000)}"),
+                    severity    = value.get("severity", "info"),
+                    node        = value.get("node", ""),
+                    description = value.get("description", ""),
+                )
+                self._alarms.append(alarm)
+            return
+
+        # Walk/create intermediate dicts
+        cur = container
+        rest = parts[1:]
+        for key in rest[:-1]:
+            if not isinstance(cur, dict):
+                return
+            if key not in cur or not isinstance(cur[key], dict):
+                cur[key] = {}
+            cur = cur[key]
+        if not rest:
+            # target is the root itself — not supported (root is always dict)
+            return
+        leaf = rest[-1]
+        if not isinstance(cur, dict):
+            return
+
+        if op == "set":
+            cur[leaf] = value
+        elif op == "increment":
+            try:
+                cur[leaf] = (cur.get(leaf) or 0) + value
+            except TypeError:
+                cur[leaf] = value
+        elif op == "append":
+            if leaf not in cur or not isinstance(cur[leaf], list):
+                cur[leaf] = []
+            cur[leaf].append(value)
 
     def get_sessions(self) -> dict:
         """Aggregate PDU session counters per UPF (per-slice, per-gNB breakdown)."""
@@ -458,6 +551,9 @@ class ContainerlabAdapter(NetworkAdapter):
             nodes=topo["nodes"], links=topo["links"],
             lsps={l["id"]: l for l in lsps}, alarms=alarms,
             slices=self.get_slices(), sessions=self.get_sessions(),
+            qer_state=self.get_qer_state(),
+            slice_metrics=self.get_slice_metrics(),
+            link_flags=self.get_link_flags(),
         )
 
     def _find_adjacent_links(self, link_id: str) -> list:
