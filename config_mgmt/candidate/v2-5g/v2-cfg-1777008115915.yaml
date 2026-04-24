@@ -1,0 +1,35 @@
+# ORCA v2 config proposal — v2-cfg-1777008115915
+# Auto-generated on approve. Branch: v2/cfg/slice-a-session-migration-off-congested--20260424-052201
+
+title: "Slice-A session migration off congested LSP-1"
+reason: |
+  Transport layer congestion on PE-01 ↔ P-02 (93% utilization, microbursts) is upstream of UPF-01 and causing slice-A p99 N3 latency to climb toward SLA breach. ORCA has read-only access to transport — no direct fix available at the MPLS layer. Nokia-domain workaround: re-anchor slice-A sessions via an alternate PFCP path that bypasses the congested LSP-1. Parallel action: TAC email drafted to operator transport team with evidence + three suggested transport-side resolutions.
+projected_impact: |
+  Slice-A traffic bypasses PE-01 ↔ P-02 congestion · p99 N3 latency recovers to ~9ms · enterprise SLA preserved until operator resolves upstream transport congestion · Nokia core impact fully contained
+triggering_incident_id: "transport-congestion-upf-innocent"
+validation_gates:
+  - name: "Syntax"
+    status: "pass"
+    detail: "Valid YAML · PFCP modification IE structure per TS 29.244"
+  - name: "Semantic"
+    status: "pass"
+    detail: "UPF-01 reachable · alternate path configuration valid · session IDs valid"
+  - name: "Mission · utilization"
+    status: "pass"
+    detail: "Alternate path utilization stays < 80% · LSP-1 bypass effective"
+  - name: "Mission · slice SLA"
+    status: "pass"
+    detail: "slice-A p99 projected recovery within 15 ms SLA"
+  - name: "Digital twin"
+    status: "pass"
+    detail: "60s simulated with session re-anchoring · transport congestion bypassed successfully"
+  - name: "Policy"
+    status: "pass"
+    detail: "Session migration batch size and timing within human-approved limits"
+diff: |
+  upf: UPF-01
+  pfcp_sessions:
+    slice-A:
+-     preferred_path: LSP-1
++     preferred_path: alternate_bypass_PE-01_to_P-02
++     rollback_plan: restore_LSP-1_on_transport_clear
