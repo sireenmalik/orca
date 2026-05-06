@@ -1,0 +1,36 @@
+# ORCA v2 config proposal — v2-cfg-1778077143700
+# Auto-generated on approve. Branch: v2/cfg/slice-a-qos-protection-on-upf-01-20260506-142203
+
+title: "Slice-A QoS protection on UPF-01"
+reason: |
+  QER drift detected on UPF-01 affecting slice-A enterprise cohort (842 accounts, $2.4M ARR). Current enforcement for slice-A priority class is 32 Mbps against a committed GBR of 50 Mbps — a 36% shortfall accumulated from successive config changes. Traffic is being throttled below contract, driving p99 N3 latency toward the 15ms SLA threshold. No alarm has fired yet; detection is pre-breach via trend slope analysis. Fix is a single atomic QER restoration.
+projected_impact: |
+  p99 N3 latency returns to 8.9ms · 842 enterprise accounts protected · $2.4M ARR cohort preserved
+triggering_incident_id: "slice-a-qos-drift"
+validation_gates:
+  - name: "Syntax"
+    status: "pass"
+    detail: "Valid YAML · QER IE structure per TS 29.244 · fields well-formed"
+  - name: "Semantic"
+    status: "pass"
+    detail: "UPF-01 reachable · slice-A QoS profile exists · QCI-to-QoS mapping valid"
+  - name: "Mission · utilization"
+    status: "pass"
+    detail: "No transport impact · all N3 links remain < 90%"
+  - name: "Mission · slice SLA"
+    status: "pass"
+    detail: "slice-A p99 projected to return to 8.9ms within 15ms SLA · slice-B unaffected"
+  - name: "Digital twin"
+    status: "pass"
+    detail: "60s simulated traffic with corrected QER · SLA maintained throughout · no new anomalies"
+  - name: "Policy"
+    status: "pass"
+    detail: "QER value 50 Mbps within operator-approved range (1-100 Mbps)"
+diff: |
+  upf: UPF-01
+  qer_profiles:
+    slice-A-priority:
+      intent_gbr_mbps: 50           # committed SLA
+-     enforced_mbps: 32             # DRIFT -36% from intent
++     enforced_mbps: 50             # restored to intent
++     enforcement_mode: strict      # hard guarantee
