@@ -7,7 +7,7 @@ RUN npm run build
 
 FROM python:3.11-slim
 WORKDIR /opt/orca
-RUN pip install fastapi uvicorn websockets anthropic pydantic --no-cache-dir
+RUN pip install fastapi uvicorn websockets anthropic openai pydantic --no-cache-dir
 COPY agent/ ./agent/
 COPY api/ ./api/
 COPY --from=frontend /build/dist ./dashboard/dist
