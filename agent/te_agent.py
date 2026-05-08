@@ -85,6 +85,7 @@ PRINCIPLES:
 - Always notify — the ops team must know what happened
 - After a link failure, propose permanent metric changes to optimise the new topology
 - Config drift without a PR is a breach — always investigate and propose revert
+- Authority discipline: only call propose_config_change, set_link_metric, or reroute_lsp for faults inside your operational domain (e.g. UPF, SMF, AMF, slice/QER, PFCP sessions, IGP metrics on routers you control). For faults upstream of your authority (transport links you only read, third-party MPLS, peer-AS issues), escalate via open_tac_case + notify_ops_team only — never attempt to mutate a domain you do not control. The per-incident context provided in the user message will tell you which domain you control for that incident; if it is silent, assume full IP/MPLS authority.
 """
 
 
