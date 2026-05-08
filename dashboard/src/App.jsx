@@ -564,8 +564,13 @@ function TopologyMap({ nodes, links, lsps, slices }) {
 const logTypeStyle = {
   alert:              { bg: "#ef444418", color: C.red,    label: "ALERT" },
   reasoning:          { bg: "#8b5cf618", color: C.purple, label: "THINK" },
+  agent_reasoning:    { bg: "#8b5cf618", color: C.purple, label: "THINK" },
+  agent_thinking:     { bg: "#8b5cf618", color: C.purple, label: "THINK" },
   tool_call:          { bg: "#06b6d418", color: C.blue,   label: "TOOL" },
   tool_result:        { bg: "#10b98118", color: C.green,  label: "RESULT" },
+  tool_error:         { bg: "#ef444418", color: C.red,    label: "TOOL ERR" },
+  security_alert:     { bg: "#ef444418", color: C.red,    label: "SECURITY" },
+  churn_risk_update:  { bg: "#eab30818", color: C.yellow, label: "CHURN" },
   notification:       { bg: "#eab30818", color: C.yellow, label: "NOTIFY" },
   status:             { bg: "#10b98118", color: C.green,  label: "STATUS" },
   agent_status:       { bg: "#10b98118", color: C.green,  label: "STATUS" },

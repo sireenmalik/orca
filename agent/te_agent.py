@@ -622,6 +622,18 @@ class ORCAAgent:
              "input_schema": {"type": "object", "properties": {}}},
             {"name": "get_alarms", "description": "Get active network alarms.",
              "input_schema": {"type": "object", "properties": {}}},
+            {"name": "get_qer_state",
+             "description": "Per-UPF QER (QoS Enforcement Rule) state per slice. Returns committed GBR vs currently enforced rate and a 'drifted' flag when enforced != intent. Use this to diagnose slice SLA degradation that originates inside a UPF rather than on the transport.",
+             "input_schema": {"type": "object", "properties": {
+                 "upf": {"type": "string", "description": "UPF id e.g. UPF-01. Omit for all UPFs."}}}},
+            {"name": "get_slice_metrics",
+             "description": "Per-slice telemetry on each UPF (currently p99 N3 latency in ms). Use this to confirm whether a slice's user-plane latency is climbing, and on which UPF, before deciding if the cause is local (QER, congestion) or upstream (transport).",
+             "input_schema": {"type": "object", "properties": {
+                 "upf": {"type": "string", "description": "UPF id e.g. UPF-01. Omit for all UPFs."}}}},
+            {"name": "get_link_flags",
+             "description": "Per-link transport flags (microbursts, etc). Use after get_link_utilization shows a link near capacity to confirm whether traffic is bursty (microbursts:true) — useful for transport-vs-UPF root-cause separation.",
+             "input_schema": {"type": "object", "properties": {
+                 "link_id": {"type": "string", "description": "Link id e.g. PE-01-P-02. Omit for all links."}}}},
             {"name": "reroute_lsp", "description": "Reroute an MPLS LSP. Make-before-break.",
              "input_schema": {"type": "object", "properties": {
                  "lsp_id": {"type": "string"}, "new_path": {"type": "array", "items": {"type": "string"}}},
@@ -722,6 +734,18 @@ class ORCAAgent:
                 result = await self.adapter.get_lsp_state()
             elif name == "get_alarms":
                 result = await self.adapter.get_alarms()
+            elif name == "get_qer_state":
+                qer = self.adapter.get_qer_state() if hasattr(self.adapter, "get_qer_state") else {}
+                upf = inputs.get("upf")
+                result = qer.get(upf, {}) if upf else qer
+            elif name == "get_slice_metrics":
+                metrics = self.adapter.get_slice_metrics() if hasattr(self.adapter, "get_slice_metrics") else {}
+                upf = inputs.get("upf")
+                result = metrics.get(upf, {}) if upf else metrics
+            elif name == "get_link_flags":
+                flags = self.adapter.get_link_flags() if hasattr(self.adapter, "get_link_flags") else {}
+                lid = inputs.get("link_id")
+                result = flags.get(lid, {}) if lid else flags
             elif name == "reroute_lsp":
                 result = await self.adapter.reroute_lsp(inputs["lsp_id"], inputs["new_path"])
             elif name == "set_link_metric":

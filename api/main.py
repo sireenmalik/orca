@@ -160,12 +160,15 @@ async def list_scenarios():
 async def inject_scenario(scenario_id: str):
     # Each inject uses the CURRENT module-level adapter — ``_reset_to_baseline``
     # rebinds it via ``global adapter``. We read adapter on entry so
-    # concurrent injects see a consistent reference.
+    # concurrent injects see a consistent reference. Agent reference is
+    # threaded in so scenarios.inject() can drive a real ``agent.analyze()``
+    # cycle instead of scripted playback.
     return await v2_scenarios.inject(
         scenario_id,
         broadcast=manager.broadcast,
         adapter=adapter,
         reset_baseline=_reset_to_baseline,
+        agent=agent,
     )
 
 @app.post("/api/scenarios/stop")
