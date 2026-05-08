@@ -107,22 +107,27 @@ SCENARIOS = {
             "STEP 2 — only if local state is healthy, expand to transport:\n"
             "  - get_link_utilization() — any link near capacity on LSP-1 path?\n"
             "  - get_link_flags() — microbursts on the suspect link?\n\n"
-            "AUTHORITY BOUNDARY — this is the most important constraint:\n"
-            "  Nokia owns: UPF, SMF, AMF, slice config, PFCP sessions, QER.\n"
-            "  Nokia does NOT own: MPLS LSP paths, IGP metrics, transport link "
-            "capacity. Those belong to a separate transport team / operator.\n\n"
-            "If diagnosis points to a TRANSPORT-side fault (link util, "
-            "microbursts, IGP metrics), you MUST NOT call propose_config_change, "
-            "set_link_metric, or reroute_lsp — they would attempt to mutate a "
-            "domain you do not control. Instead:\n"
-            "  - open_tac_case with vendor='juniper' (the transport vendor in "
-            "this lab) describing the transport-side fault and evidence,\n"
-            "  - notify_ops_team to inform the Nokia NOC of the upstream issue "
-            "and that Nokia-side action is not appropriate,\n"
-            "  - write_episode and assess_sla_risk to close the cycle.\n\n"
-            "If diagnosis points to a NOKIA-LOCAL fault (e.g. QER drift on UPF), "
-            "use the standard cycle including propose_config_change."
+            "POLITICAL CONTEXT — Nokia is the operator running this agent. "
+            "Nokia owns UPF/SMF/AMF/slice/QER/PFCP. The MPLS transport (LSP "
+            "paths, IGP metrics, link capacity) belongs to a separate transport "
+            "operator. For this incident the harness has pre-emptively withheld "
+            "the LSP/IGP/proposal tools — you literally do not have access to "
+            "reroute_lsp, set_link_metric, or propose_config_change. Do not "
+            "waste a turn trying to call them.\n\n"
+            "What you CAN and SHOULD do if the fault is transport-side:\n"
+            "  - open_tac_case(vendor='juniper', node=<their PE>, "
+            "fault_type='link_congestion', severity='P1', description=<full "
+            "evidence + your suggested fix, e.g. 'increase IGP metric on "
+            "PE-01-P-02 from 10 to 20'>) — your proposed remedy goes in the "
+            "description body. The transport team reads it, decides, and "
+            "deploys on their domain.\n"
+            "  - notify_ops_team(severity='major', subject=..., message=...) — "
+            "tell the Nokia NOC what we observed, that we have escalated to "
+            "the transport vendor, and that no Nokia-side config change is "
+            "appropriate.\n"
+            "  - write_episode and assess_sla_risk to close the cycle."
         ),
+        "restricted_tools": ["reroute_lsp", "set_link_metric", "propose_config_change"],
     },
 }
 
@@ -206,7 +211,10 @@ async def _play(scenario: dict, broadcast, adapter, agent) -> None:
         # so the dashboard's reasoning log fills in real time.
         if agent is not None:
             try:
-                await agent.analyze(context=scenario["agent_context"])
+                await agent.analyze(
+                    context=scenario["agent_context"],
+                    restricted_tools=scenario.get("restricted_tools"),
+                )
             except Exception as e:
                 await broadcast({
                     "type":      "scenario_log",
