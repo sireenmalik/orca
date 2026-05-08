@@ -211,9 +211,80 @@ async def reset_scenarios():
 class V2EmailAction(BaseModel):
     comment: str = ""
 
+# ── Shape adapters for unified UI ────────────────────────────────────────────
+# The v2 dashboard tabs (Email Outbox, Config Proposals) read /api/v2/emails
+# and /api/proposals respectively. On the NIMO branch the agent (Nemotron or
+# Sonnet) writes to the agent-native lists exposed at /api/emails and
+# /api/config-proposals — different shapes, populated by real LLM tool calls
+# rather than scripted demo Acts. To make those visible without a frontend
+# rewrite we transform agent records into the v2 shape on the way out and
+# union them with whatever the v2 lists hold.
+
+def _agent_email_to_v2(e: dict) -> dict:
+    to = e.get("to", "")
+    return {
+        "id":         e.get("id", ""),
+        "type":       "internal_ops",
+        "to":         [to] if isinstance(to, str) and to else (to if isinstance(to, list) else []),
+        "subject":    e.get("subject", ""),
+        "body":       e.get("body", ""),
+        "status":     "sent",
+        "tag":        "agent",
+        "created_at": e.get("timestamp"),
+    }
+
+def _agent_proposal_to_v2(p: dict) -> dict:
+    vc = p.get("validation_checks", {}) or {}
+    vd = p.get("validation_detail", {}) or {}
+    gates = [
+        {
+            "name":   k.replace("_", " ").title(),
+            "status": "pass" if (vc.get(k, True) if isinstance(vc.get(k, True), bool) else True) else "fail",
+            "detail": vd.get(k, "") if isinstance(vd.get(k, ""), str) else "",
+        }
+        for k in ("syntax", "semantic", "mission_1", "mission_2", "digital_twin", "policy")
+    ]
+    devices, device_diffs, device_configs = [], {}, {}
+    seen = set()
+    for ch in p.get("changes", []) or []:
+        d = ch.get("device") or ch.get("node") or ch.get("router") or "unknown"
+        if d not in seen:
+            seen.add(d)
+            devices.append({"id": d, "label": f"{d} · {ch.get('type','change')}", "note": ch.get("type", "change")})
+            device_diffs[d]   = []
+            device_configs[d] = ""
+        if ch.get("diff_summary"):
+            device_diffs[d].append({"type": "context", "line": ch["diff_summary"]})
+        if ch.get("current_config"):
+            for ln in str(ch["current_config"]).splitlines():
+                device_diffs[d].append({"type": "remove", "line": ln})
+        if ch.get("new_config"):
+            for ln in str(ch["new_config"]).splitlines():
+                device_diffs[d].append({"type": "add", "line": ln})
+            device_configs[d] += ch["new_config"] + "\n"
+    return {
+        "id":                p.get("id", ""),
+        "title":             p.get("title", "(untitled)"),
+        "summary":           (p.get("title") or "")[:120],
+        "reason":            p.get("reason", ""),
+        "projected_impact":  p.get("projected_improvement", ""),
+        "status":            p.get("status", "pending"),
+        "validation_gates":  gates,
+        "devices":           devices,
+        "device_diffs":      device_diffs,
+        "device_configs":    device_configs,
+        "diff":              (device_diffs.get(devices[0]["id"], []) if devices else []),
+        "created_at":        p.get("timestamp"),
+        "pr_url":            p.get("pr_url"),
+        "pr_number":         p.get("pr_number"),
+        "_origin":           "agent",
+    }
+
 @app.get("/api/v2/emails")
 async def v2_list_emails():
-    return {"emails": v2_emails.get_emails()}
+    base  = list(v2_emails.get_emails())
+    agent_emails = [_agent_email_to_v2(e) for e in (get_pending_emails() or [])]
+    return {"emails": base + agent_emails}
 
 @app.post("/api/v2/emails/{email_id}/send")
 async def v2_send_email(email_id: str, body: V2EmailAction = V2EmailAction()):
@@ -331,7 +402,9 @@ class V2ProposalAction(BaseModel):
 
 @app.get("/api/proposals")
 async def v2_list_proposals():
-    return {"proposals": v2_proposals.get_proposals()}
+    base  = list(v2_proposals.get_proposals())
+    agent_props = [_agent_proposal_to_v2(p) for p in (get_config_proposals() or [])]
+    return {"proposals": base + agent_props}
 
 @app.post("/api/proposals")
 async def v2_create_proposal(req: V2ProposalCreate):
@@ -351,15 +424,23 @@ async def v2_clear_proposals():
     v2_proposals.clear_proposals()
     return {"status": "cleared"}
 
+def _is_agent_proposal_id(proposal_id: str) -> bool:
+    return any(str(p.get("id")) == str(proposal_id) for p in (get_config_proposals() or []))
+
 @app.post("/api/proposals/{proposal_id}/approve")
 async def v2_approve_proposal(proposal_id: str, body: V2ProposalAction = V2ProposalAction()):
-    result = await v2_proposals.approve_proposal(proposal_id, manager.broadcast)
-    return result
+    # Dispatch by id origin so the v2 dashboard's single approve button
+    # correctly routes agent-created proposals through the agent's
+    # stream_approval pipeline (which opens a real PR + writes the episode).
+    if _is_agent_proposal_id(proposal_id):
+        return await approve_proposal(proposal_id, ProposalAction(comment=body.comment))
+    return await v2_proposals.approve_proposal(proposal_id, manager.broadcast)
 
 @app.post("/api/proposals/{proposal_id}/reject")
 async def v2_reject_proposal(proposal_id: str, body: V2ProposalAction = V2ProposalAction()):
-    result = await v2_proposals.reject_proposal(proposal_id, manager.broadcast, body.comment)
-    return result
+    if _is_agent_proposal_id(proposal_id):
+        return await reject_proposal(proposal_id, ProposalAction(comment=body.comment))
+    return await v2_proposals.reject_proposal(proposal_id, manager.broadcast, body.comment)
 
 class V2ProposalSave(BaseModel):
     comment: Optional[str] = None
