@@ -241,6 +241,78 @@ function Panel({ title, badge, children, style }) {
   );
 }
 
+// ─── CHURN METER ──────────────────────────────────────────────────────────────
+// Compact portfolio-level risk readout for the right sidebar. Polls
+// /api/churn-risk every 10s and snaps to live churn_risk_update events
+// from the WebSocket bus (same data the Churn Forecast tab uses).
+function ChurnMeter({ events }) {
+  const [risks, setRisks] = useState({});
+  useEffect(() => {
+    const poll = async () => {
+      try {
+        const r = await fetch(`${API}/api/churn-risk`);
+        const d = await r.json();
+        if (d.risks) setRisks(d.risks);
+      } catch {}
+    };
+    poll();
+    const t = setInterval(poll, 10000);
+    return () => clearInterval(t);
+  }, []);
+  useEffect(() => {
+    const latest = [...events].reverse().find(e => e.type === "churn_risk_update");
+    if (latest?.data?.risks) setRisks(latest.data.risks);
+  }, [events]);
+
+  const riskList = Object.values(risks);
+  if (!riskList.length) {
+    return <div style={{ fontSize: FS.body, color: C.muted, textAlign: "center", padding: "4px 0" }}>—</div>;
+  }
+  const bandColor = { healthy: C.green, watch: C.yellow, at_risk: C.orange, critical: C.red };
+  const counts = { healthy: 0, watch: 0, at_risk: 0, critical: 0 };
+  let arrAtRisk = 0, avgChurn = 0;
+  for (const r of riskList) {
+    counts[r.risk_band || "healthy"] = (counts[r.risk_band || "healthy"] || 0) + 1;
+    if (r.risk_band === "at_risk" || r.risk_band === "critical") arrAtRisk += (r.arr_usd || 0);
+    avgChurn += (r.churn_probability_pct || 0);
+  }
+  avgChurn = avgChurn / riskList.length;
+  const arrLabel = arrAtRisk >= 1e6 ? `$${(arrAtRisk/1e6).toFixed(1)}M`
+                  : arrAtRisk >= 1e3 ? `$${(arrAtRisk/1e3).toFixed(0)}K`
+                  : `$${arrAtRisk.toFixed(0)}`;
+  const worstBand = counts.critical ? "critical" : counts.at_risk ? "at_risk" : counts.watch ? "watch" : "healthy";
+
+  return (
+    <div>
+      {/* Headline number */}
+      <div style={{ display: "flex", alignItems: "baseline", gap: 6, marginBottom: 6 }}>
+        <span style={{ fontSize: "clamp(20px, 1.8vw, 28px)", fontWeight: 800, fontFamily: "monospace", color: bandColor[worstBand], lineHeight: 1 }}>
+          {avgChurn.toFixed(1)}%
+        </span>
+        <span style={{ fontSize: FS.logBadge, color: C.muted, letterSpacing: 0.3 }}>portfolio churn</span>
+      </div>
+      {/* Stacked bar by band */}
+      <div style={{ display: "flex", height: 6, borderRadius: 3, overflow: "hidden", marginBottom: 6, background: C.border }}>
+        {["healthy","watch","at_risk","critical"].map(b =>
+          counts[b] > 0 ? <div key={b} style={{ flex: counts[b], background: bandColor[b], minWidth: 2 }} /> : null
+        )}
+      </div>
+      {/* Counts row */}
+      <div style={{ display: "flex", justifyContent: "space-between", fontSize: FS.logBadge, fontFamily: "monospace", marginBottom: 6 }}>
+        <span style={{ color: C.green }} title="healthy">{counts.healthy} ✓</span>
+        <span style={{ color: C.yellow }} title="watch">{counts.watch} ◔</span>
+        <span style={{ color: C.orange }} title="at-risk">{counts.at_risk} ◑</span>
+        <span style={{ color: C.red, fontWeight: 700 }} title="critical">{counts.critical} ●</span>
+      </div>
+      {/* ARR at risk */}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", fontSize: FS.logBadge, fontFamily: "monospace" }}>
+        <span style={{ color: C.muted, letterSpacing: 0.3 }}>at-risk ARR</span>
+        <span style={{ color: arrAtRisk > 0 ? C.red : C.muted, fontWeight: 700 }}>{arrLabel}</span>
+      </div>
+    </div>
+  );
+}
+
 // ─── DRAGGABLE MODAL ──────────────────────────────────────────────────────────
 function Modal({ title, onClose, children, width = "780px" }) {
   const [pos, setPos] = useState(null);
@@ -2467,20 +2539,26 @@ function OperationsTab({ state, events, agentRunning, wsStatus, onToggleAgent, o
           {agentRunning ? "⏹ Stop" : "▶ Start"}
         </button>
       </div>
+      <Panel title="Churn Risk" style={{ flexShrink: 0 }}>
+        <ChurnMeter events={events} />
+      </Panel>
       <Panel title="Active LSPs" style={{ flex: 1, minHeight: 0 }}>
         {visibleLsps.length === 0 ? (
           <div style={{ fontSize: FS.body, color: C.muted, textAlign: "center", paddingTop: 8 }}>No LSP data</div>
         ) : visibleLsps.map(([id, l]) => (
-          <div key={id} style={{ padding: "6px 0", borderBottom: `1px solid ${C.border}22`, display: "flex", flexDirection: "column", gap: 3 }}>
+          <div key={id} style={{ padding: "4px 0", borderBottom: `1px solid ${C.border}22`, display: "flex", flexDirection: "column", gap: 1 }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 6 }}>
-              <span style={{ fontSize: FS.lspName, fontWeight: 700, fontFamily: "monospace", color: C.blue }}>{id}</span>
-              <span style={{ fontSize: FS.logBadge, padding: "1px 5px", borderRadius: 3, background: l.state === "up" ? C.green + "12" : C.red + "18", color: l.state === "up" ? C.green : C.red, fontFamily: "monospace", flexShrink: 0 }}>{l.state || "up"}</span>
+              <span style={{ fontSize: "clamp(11px, 0.85vw, 13px)", fontWeight: 700, fontFamily: "monospace", color: C.blue }}>{id}</span>
+              <span style={{ fontSize: "clamp(9px, 0.7vw, 11px)", color: C.muted, fontFamily: "monospace", display: "flex", alignItems: "center", gap: 5 }}>
+                {l.bandwidth_gbps ? <span>{l.bandwidth_gbps}G</span> : null}
+                <span style={{ padding: "0 4px", borderRadius: 2, background: l.state === "up" ? C.green + "12" : C.red + "18", color: l.state === "up" ? C.green : C.red }}>
+                  {l.state || "up"}
+                </span>
+              </span>
             </div>
-            {/* Path: wrap (don't clip) when sidebar is narrow */}
-            <div style={{ fontSize: FS.lspPath, color: C.muted, fontFamily: "monospace", whiteSpace: "normal", wordBreak: "break-word", lineHeight: 1.4 }}>
+            <div style={{ fontSize: "clamp(10px, 0.8vw, 12px)", color: C.muted, fontFamily: "monospace", whiteSpace: "normal", wordBreak: "break-word", lineHeight: 1.3 }}>
               {(l.path || []).join(" → ")}
             </div>
-            {l.bandwidth_gbps && <div style={{ fontSize: FS.lspBandwidth, color: C.muted }}>{l.bandwidth_gbps} Gbps</div>}
           </div>
         ))}
       </Panel>
