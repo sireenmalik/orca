@@ -2376,7 +2376,7 @@ function GlobalStyles() {
 }
 
 // ─── OPERATIONS TAB ──────────────────────────────────────────────────────────
-function OperationsTab({ state, events, agentRunning, wsStatus, onToggleAgent, onAnalyze, onAction, onConfigAction, onEmailSend, logModalOpen, setLogModalOpen, emailModal, setEmailModal, configModal, setConfigModal }) {
+function OperationsTab({ state, events, agentRunning, wsStatus, onToggleAgent, onAnalyze, onAction, onConfigAction, onEmailSend, onNavigate, logModalOpen, setLogModalOpen, emailModal, setEmailModal, configModal, setConfigModal }) {
   const [proposals, setProposals] = useState([]);       // v1 store, kept for baseline
   const [v2Proposals, setV2Proposals] = useState([]);   // v2 demo chassis — the panel renders these
   const [emails, setEmails] = useState([]);
@@ -2539,9 +2539,17 @@ function OperationsTab({ state, events, agentRunning, wsStatus, onToggleAgent, o
           {agentRunning ? "⏹ Stop" : "▶ Start"}
         </button>
       </div>
-      <Panel title="Churn Risk" style={{ flexShrink: 0 }}>
-        <ChurnMeter events={events} />
-      </Panel>
+      <div
+        onClick={() => onNavigate && onNavigate("churn")}
+        title="Open Churn Forecast"
+        style={{ cursor: onNavigate ? "pointer" : "default", flexShrink: 0 }}
+        onMouseEnter={e => { e.currentTarget.firstChild.style.borderColor = C.blue + "66"; }}
+        onMouseLeave={e => { e.currentTarget.firstChild.style.borderColor = C.border; }}
+      >
+        <Panel title="Churn Risk ▸" style={{ transition: "border-color 0.15s" }}>
+          <ChurnMeter events={events} />
+        </Panel>
+      </div>
       <Panel title="Active LSPs" style={{ flex: 1, minHeight: 0 }}>
         {visibleLsps.length === 0 ? (
           <div style={{ fontSize: FS.body, color: C.muted, textAlign: "center", paddingTop: 8 }}>No LSP data</div>
@@ -3789,6 +3797,7 @@ export default function App() {
             state={state} events={events} agentRunning={agentRunning} wsStatus={wsStatus}
             onToggleAgent={toggleAgent} onAnalyze={analyzeBtn} onAction={handleAction}
             onConfigAction={handleConfigAction} onEmailSend={handleEmailSend}
+            onNavigate={setActiveTab}
             logModalOpen={logModalOpen} setLogModalOpen={setLogModalOpen}
             emailModal={emailModal} setEmailModal={setEmailModal}
             configModal={configModal} setConfigModal={setConfigModal}
