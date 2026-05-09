@@ -214,6 +214,7 @@ async def _play(scenario: dict, broadcast, adapter, agent) -> None:
                 await agent.analyze(
                     context=scenario["agent_context"],
                     restricted_tools=scenario.get("restricted_tools"),
+                    effort=scenario.get("effort"),
                 )
             except Exception as e:
                 await broadcast({
