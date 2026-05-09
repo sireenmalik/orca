@@ -269,43 +269,70 @@ function ChurnMeter({ events }) {
     return <div style={{ fontSize: FS.body, color: C.muted, textAlign: "center", padding: "4px 0" }}>—</div>;
   }
   const bandColor = { healthy: C.green, watch: C.yellow, at_risk: C.orange, critical: C.red };
+  const bandLabel = { healthy: "healthy", watch: "watch", at_risk: "at-risk", critical: "critical" };
+  const bandIcon  = { healthy: "✓", watch: "◔", at_risk: "◑", critical: "●" };
   const counts = { healthy: 0, watch: 0, at_risk: 0, critical: 0 };
-  let arrAtRisk = 0, avgChurn = 0;
+  let arrAtRisk = 0;
   for (const r of riskList) {
     counts[r.risk_band || "healthy"] = (counts[r.risk_band || "healthy"] || 0) + 1;
     if (r.risk_band === "at_risk" || r.risk_band === "critical") arrAtRisk += (r.arr_usd || 0);
-    avgChurn += (r.churn_probability_pct || 0);
   }
-  avgChurn = avgChurn / riskList.length;
+  const total = riskList.length;
   const arrLabel = arrAtRisk >= 1e6 ? `$${(arrAtRisk/1e6).toFixed(1)}M`
                   : arrAtRisk >= 1e3 ? `$${(arrAtRisk/1e3).toFixed(0)}K`
                   : `$${arrAtRisk.toFixed(0)}`;
-  const worstBand = counts.critical ? "critical" : counts.at_risk ? "at_risk" : counts.watch ? "watch" : "healthy";
+
+  // Donut — segments sized by customer count, drawn most-severe-first
+  // (red → orange → yellow → green) starting at 12 o'clock so the eye lands
+  // on critical first if any.
+  const cx = 50, cy = 50, r = 32, sw = 11, C2 = 2 * Math.PI * r;
+  const order = ["critical", "at_risk", "watch", "healthy"];
+  let cumulative = 0;
+  const segments = order.map(band => {
+    const c = counts[band] || 0;
+    if (c === 0) return null;
+    const frac = c / total;
+    const len = frac * C2;
+    const offset = -cumulative * C2;
+    cumulative += frac;
+    return (
+      <circle key={band} cx={cx} cy={cy} r={r} fill="none" stroke={bandColor[band]}
+        strokeWidth={sw} strokeDasharray={`${len} ${C2 - len}`}
+        strokeDashoffset={offset} transform={`rotate(-90 ${cx} ${cy})`} />
+    );
+  });
 
   return (
     <div>
-      {/* Headline number */}
-      <div style={{ display: "flex", alignItems: "baseline", gap: 6, marginBottom: 6 }}>
-        <span style={{ fontSize: "clamp(20px, 1.8vw, 28px)", fontWeight: 800, fontFamily: "monospace", color: bandColor[worstBand], lineHeight: 1 }}>
-          {avgChurn.toFixed(1)}%
-        </span>
-        <span style={{ fontSize: FS.logBadge, color: C.muted, letterSpacing: 0.3 }}>portfolio churn</span>
-      </div>
-      {/* Stacked bar by band */}
-      <div style={{ display: "flex", height: 6, borderRadius: 3, overflow: "hidden", marginBottom: 6, background: C.border }}>
-        {["healthy","watch","at_risk","critical"].map(b =>
-          counts[b] > 0 ? <div key={b} style={{ flex: counts[b], background: bandColor[b], minWidth: 2 }} /> : null
-        )}
-      </div>
-      {/* Counts row */}
-      <div style={{ display: "flex", justifyContent: "space-between", fontSize: FS.logBadge, fontFamily: "monospace", marginBottom: 6 }}>
-        <span style={{ color: C.green }} title="healthy">{counts.healthy} ✓</span>
-        <span style={{ color: C.yellow }} title="watch">{counts.watch} ◔</span>
-        <span style={{ color: C.orange }} title="at-risk">{counts.at_risk} ◑</span>
-        <span style={{ color: C.red, fontWeight: 700 }} title="critical">{counts.critical} ●</span>
+      {/* Donut + legend in a row */}
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
+        <svg width={84} height={84} viewBox="0 0 100 100" style={{ flexShrink: 0 }}>
+          {/* Background ring so empty bands are visible */}
+          <circle cx={cx} cy={cy} r={r} fill="none" stroke={C.border} strokeWidth={sw} />
+          {segments}
+          {/* Center: total customer count */}
+          <text x={cx} y={cy - 2} textAnchor="middle" dominantBaseline="middle"
+            fontSize="20" fontWeight="800" fill={C.text} fontFamily="monospace">{total}</text>
+          <text x={cx} y={cy + 14} textAnchor="middle" dominantBaseline="middle"
+            fontSize="9" fill={C.muted} fontFamily="monospace" letterSpacing="0.5">CUST</text>
+        </svg>
+        {/* Legend */}
+        <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 2, fontSize: FS.logBadge, fontFamily: "monospace" }}>
+          {order.slice().reverse().map(b => (
+            <div key={b} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 6 }}>
+              <span style={{ color: bandColor[b], display: "flex", alignItems: "center", gap: 4 }}>
+                <span style={{ fontSize: 10 }}>{bandIcon[b]}</span>
+                <span style={{ letterSpacing: 0.3 }}>{bandLabel[b]}</span>
+              </span>
+              <span style={{ color: counts[b] > 0 ? bandColor[b] : C.muted, fontWeight: counts[b] > 0 ? 700 : 400 }}>
+                {counts[b]}
+              </span>
+            </div>
+          ))}
+        </div>
       </div>
       {/* ARR at risk */}
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", fontSize: FS.logBadge, fontFamily: "monospace" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", fontSize: FS.logBadge, fontFamily: "monospace", paddingTop: 6, borderTop: `1px solid ${C.border}` }}>
         <span style={{ color: C.muted, letterSpacing: 0.3 }}>at-risk ARR</span>
         <span style={{ color: arrAtRisk > 0 ? C.red : C.muted, fontWeight: 700 }}>{arrLabel}</span>
       </div>
