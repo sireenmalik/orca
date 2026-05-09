@@ -1,0 +1,11 @@
+# ORCA Config Proposal — PE-01
+# Generated: 2026-05-09T05:43:25.053399Z
+# Incident: QER drift detected: intent 50 Mbps, enforced 32 Mbps causing throttling and increased latency for slice-A, projecting SLA breach within 4 minutes.
+# Branch: cfg/PE-01-20260509-054324
+
+configure router isis 0
+    interface "unknown"
+-       metric ?
++       metric ?
+    exit
+exit
