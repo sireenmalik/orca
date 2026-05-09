@@ -1,0 +1,11 @@
+# ORCA Config Proposal — PE-01
+# Generated: 2026-05-09T02:19:36.553004Z
+# Incident: QER state shows enforced_mbps (32) < intent_gbr_mbps (50) for slice-A, causing under-enforcement and increased latency. Adjusting QER to match intent will restore guaranteed bandwidth and reduce latency.
+# Branch: cfg/PE-01-20260509-021935
+
+configure router isis 0
+    interface "unknown"
+-       metric ?
++       metric ?
+    exit
+exit
