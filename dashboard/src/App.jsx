@@ -242,61 +242,63 @@ function Panel({ title, badge, children, style }) {
 }
 
 // ─── CHURN METER ──────────────────────────────────────────────────────────────
-// Compact portfolio-level risk readout for the right sidebar. Polls
-// /api/churn-risk every 10s and snaps to live churn_risk_update events
-// from the WebSocket bus (same data the Churn Forecast tab uses).
+// Compact portfolio-level risk readout for the right sidebar. Reads from
+// the SAME /api/customers source as the Churn Forecast tab via
+// rollupPortfolio() — one source of truth across the dashboard. Refreshes
+// on agent_status:complete events so post-cycle risk shifts surface live.
 function ChurnMeter({ events }) {
-  const [risks, setRisks] = useState({});
-  useEffect(() => {
-    const poll = async () => {
-      try {
-        const r = await fetch(`${API}/api/churn-risk`);
-        const d = await r.json();
-        if (d.risks) setRisks(d.risks);
-      } catch {}
-    };
-    poll();
-    const t = setInterval(poll, 10000);
-    return () => clearInterval(t);
+  const [customers, setCustomers] = useState([]);
+  const fetchCustomers = useCallback(async () => {
+    try {
+      const r = await fetch(`${API}/api/customers`);
+      const d = await r.json();
+      setCustomers(d.customers || []);
+    } catch {}
   }, []);
   useEffect(() => {
-    const latest = [...events].reverse().find(e => e.type === "churn_risk_update");
-    if (latest?.data?.risks) setRisks(latest.data.risks);
-  }, [events]);
+    fetchCustomers();
+    const t = setInterval(fetchCustomers, 30000);
+    return () => clearInterval(t);
+  }, [fetchCustomers]);
+  useEffect(() => {
+    const last = events[events.length - 1];
+    if (last?.type === "agent_status" && last.data?.status === "complete") {
+      fetchCustomers();
+    }
+  }, [events, fetchCustomers]);
 
-  const riskList = Object.values(risks);
-  if (!riskList.length) {
+  const portfolio = useMemo(() => rollupPortfolio(customers), [customers]);
+  if (!portfolio.totals.count) {
     return <div style={{ fontSize: FS.body, color: C.muted, textAlign: "center", padding: "4px 0" }}>—</div>;
   }
-  const bandColor = { healthy: C.green, watch: C.yellow, at_risk: C.orange, critical: C.red };
-  const bandLabel = { healthy: "healthy", watch: "watch", at_risk: "at-risk", critical: "critical" };
-  const bandIcon  = { healthy: "✓", watch: "◔", at_risk: "◑", critical: "●" };
-  const counts = { healthy: 0, watch: 0, at_risk: 0, critical: 0 };
-  let arrAtRisk = 0;
-  for (const r of riskList) {
-    counts[r.risk_band || "healthy"] = (counts[r.risk_band || "healthy"] || 0) + 1;
-    if (r.risk_band === "at_risk" || r.risk_band === "critical") arrAtRisk += (r.arr_usd || 0);
-  }
-  const total = riskList.length;
+
+  const counts = {
+    critical: portfolio.bands.critical.length,
+    at_risk:  portfolio.bands.at_risk.length,
+    watch:    portfolio.bands.watch.length,
+    healthy:  portfolio.bands.healthy.length,
+  };
+  const total = portfolio.totals.count;
+  const arrAtRisk = portfolio.totals.revenue_at_risk;
   const arrLabel = arrAtRisk >= 1e6 ? `$${(arrAtRisk/1e6).toFixed(1)}M`
                   : arrAtRisk >= 1e3 ? `$${(arrAtRisk/1e3).toFixed(0)}K`
                   : `$${arrAtRisk.toFixed(0)}`;
 
   // Donut — segments sized by customer count, drawn most-severe-first
-  // (red → orange → yellow → green) starting at 12 o'clock so the eye lands
-  // on critical first if any.
-  const cx = 50, cy = 50, r = 32, sw = 11, C2 = 2 * Math.PI * r;
+  // (red → orange → yellow → green) starting at 12 o'clock so the eye
+  // lands on critical first if any.
+  const cx = 50, cy = 50, rr = 32, sw = 11, C2 = 2 * Math.PI * rr;
   const order = ["critical", "at_risk", "watch", "healthy"];
   let cumulative = 0;
-  const segments = order.map(band => {
-    const c = counts[band] || 0;
-    if (c === 0) return null;
-    const frac = c / total;
+  const segments = order.map(b => {
+    const cnt = counts[b];
+    if (cnt === 0) return null;
+    const frac = cnt / total;
     const len = frac * C2;
     const offset = -cumulative * C2;
     cumulative += frac;
     return (
-      <circle key={band} cx={cx} cy={cy} r={r} fill="none" stroke={bandColor[band]}
+      <circle key={b} cx={cx} cy={cy} r={rr} fill="none" stroke={bandColor(b)}
         strokeWidth={sw} strokeDasharray={`${len} ${C2 - len}`}
         strokeDashoffset={offset} transform={`rotate(-90 ${cx} ${cy})`} />
     );
@@ -304,34 +306,32 @@ function ChurnMeter({ events }) {
 
   return (
     <div>
-      {/* Donut + legend in a row */}
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
         <svg width={84} height={84} viewBox="0 0 100 100" style={{ flexShrink: 0 }}>
-          {/* Background ring so empty bands are visible */}
-          <circle cx={cx} cy={cy} r={r} fill="none" stroke={C.border} strokeWidth={sw} />
+          <circle cx={cx} cy={cy} r={rr} fill="none" stroke={C.border} strokeWidth={sw} />
           {segments}
-          {/* Center: total customer count */}
           <text x={cx} y={cy - 2} textAnchor="middle" dominantBaseline="middle"
             fontSize="20" fontWeight="800" fill={C.text} fontFamily="monospace">{total}</text>
           <text x={cx} y={cy + 14} textAnchor="middle" dominantBaseline="middle"
             fontSize="9" fill={C.muted} fontFamily="monospace" letterSpacing="0.5">CUST</text>
         </svg>
-        {/* Legend */}
         <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 2, fontSize: FS.logBadge, fontFamily: "monospace" }}>
-          {order.slice().reverse().map(b => (
-            <div key={b} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 6 }}>
-              <span style={{ color: bandColor[b], display: "flex", alignItems: "center", gap: 4 }}>
-                <span style={{ fontSize: 10 }}>{bandIcon[b]}</span>
-                <span style={{ letterSpacing: 0.3 }}>{bandLabel[b]}</span>
-              </span>
-              <span style={{ color: counts[b] > 0 ? bandColor[b] : C.muted, fontWeight: counts[b] > 0 ? 700 : 400 }}>
-                {counts[b]}
-              </span>
-            </div>
-          ))}
+          {order.slice().reverse().map(b => {
+            const meta = HEALTH_BANDS.find(x => x.id === b);
+            return (
+              <div key={b} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 6 }}>
+                <span style={{ color: bandColor(b), display: "flex", alignItems: "center", gap: 4 }}>
+                  <span style={{ fontSize: 10 }}>{meta?.icon}</span>
+                  <span style={{ letterSpacing: 0.3 }}>{meta?.label}</span>
+                </span>
+                <span style={{ color: counts[b] > 0 ? bandColor(b) : C.muted, fontWeight: counts[b] > 0 ? 700 : 400 }}>
+                  {counts[b]}
+                </span>
+              </div>
+            );
+          })}
         </div>
       </div>
-      {/* ARR at risk */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", fontSize: FS.logBadge, fontFamily: "monospace", paddingTop: 6, borderTop: `1px solid ${C.border}` }}>
         <span style={{ color: C.muted, letterSpacing: 0.3 }}>at-risk ARR</span>
         <span style={{ color: arrAtRisk > 0 ? C.red : C.muted, fontWeight: 700 }}>{arrLabel}</span>
@@ -3092,6 +3092,93 @@ function fmtCount(n) {
   return `${v}`;
 }
 
+// ─── Customer portfolio rollup (single source of truth) ─────────────────────
+// All churn UI — the Operations sidebar donut and the Churn Forecast tab —
+// computes from this helper against the /api/customers fixtures. The legacy
+// /api/churn (pre-baked v2 cohorts) and /api/churn-risk (per-LSP synthetic
+// risk) endpoints are no longer read by the dashboard; today's customer
+// fixtures are the canonical source. Numbers cross-foot to the YAMLs.
+const DOMAIN_LABELS = {
+  "5g-private-slice": "5G Private Slice",
+  "5g-embb-slice":    "5G eMBB",
+  "mpls-l3vpn":       "MPLS L3VPN",
+  "optical-wave":     "Optical Wave",
+};
+
+const HEALTH_BANDS = [
+  { id: "critical", min: 0,  max: 44,  label: "critical", icon: "●" },
+  { id: "at_risk",  min: 45, max: 64,  label: "at-risk",  icon: "◑" },
+  { id: "watch",    min: 65, max: 79,  label: "watch",    icon: "◔" },
+  { id: "healthy",  min: 80, max: 100, label: "healthy",  icon: "✓" },
+];
+
+function bandForHealth(h) {
+  for (const b of HEALTH_BANDS) if (h >= b.min && h <= b.max) return b;
+  return HEALTH_BANDS[0];
+}
+
+function bandColor(bandId) {
+  return bandId === "critical" ? C.red
+       : bandId === "at_risk"  ? C.orange
+       : bandId === "watch"    ? C.yellow
+       : C.green;
+}
+
+function rollupPortfolio(customers) {
+  const empty = {
+    cohorts: [], top_at_risk: [],
+    bands:  { critical: [], at_risk: [], watch: [], healthy: [] },
+    totals: { count: 0, total_arr: 0, at_risk_count: 0, critical_count: 0, revenue_at_risk: 0, total_arr_at_risk_pct: 0 },
+  };
+  if (!customers || !customers.length) return empty;
+
+  const bands = { critical: [], at_risk: [], watch: [], healthy: [] };
+  const byDomain = {};
+  for (const c of customers) {
+    const h = c.churn_signals?.health_score ?? 70;
+    const b = bandForHealth(h);
+    bands[b.id].push(c);
+    const t = c.service?.type || "unknown";
+    (byDomain[t] = byDomain[t] || []).push(c);
+  }
+
+  const isAtRisk = c => (c.churn_signals?.health_score ?? 70) < 65;
+  const isCritical = c => (c.churn_signals?.health_score ?? 70) < 45;
+
+  const cohorts = Object.entries(byDomain).map(([type, members]) => {
+    const totalARR = members.reduce((s, c) => s + (c.arr_usd || 0), 0);
+    const atRisk = members.filter(isAtRisk);
+    const crit   = members.filter(isCritical);
+    const arrExposed = atRisk.reduce((s, c) => s + (c.arr_usd || 0), 0);
+    const status = crit.length > 0 ? "RED" : atRisk.length > 0 ? "AMBER" : "GREEN";
+    return {
+      id: type, label: DOMAIN_LABELS[type] || type,
+      members, count: members.length,
+      at_risk_count: atRisk.length, critical_count: crit.length,
+      total_arr: totalARR, arr_exposed: arrExposed,
+      pct_at_risk: members.length ? (atRisk.length / members.length * 100) : 0,
+      status,
+    };
+  }).sort((a, b) => b.arr_exposed - a.arr_exposed);
+
+  const totalARR    = customers.reduce((s, c) => s + (c.arr_usd || 0), 0);
+  const atRiskAll   = bands.critical.length + bands.at_risk.length;
+  const arrAtRisk   = [...bands.critical, ...bands.at_risk].reduce((s, c) => s + (c.arr_usd || 0), 0);
+  const top_at_risk = [...bands.critical, ...bands.at_risk]
+                        .sort((a, b) => (b.arr_usd || 0) - (a.arr_usd || 0));
+  return {
+    cohorts, bands, top_at_risk,
+    totals: {
+      count:                  customers.length,
+      total_arr:              totalARR,
+      at_risk_count:          atRiskAll,
+      critical_count:         bands.critical.length,
+      revenue_at_risk:        arrAtRisk,
+      total_arr_at_risk_pct:  totalARR ? (arrAtRisk / totalARR * 100) : 0,
+    },
+  };
+}
+
 // Tiny SVG sparkline for the cohort table trend column.
 function Sparkline({ points, color, width = 70, height = 22 }) {
   if (!points || points.length < 2) return <svg width={width} height={height} />;
@@ -3146,26 +3233,38 @@ function AtRiskTimeSeries({ data, sliceAColor }) {
 }
 
 function ChurnTab({ events }) {
-  // Live state from backend (/api/churn). `displayed` is what's actually
-  // on screen — animates between baseline and recovered during the grace
-  // window, snaps otherwise.
-  const [churn, setChurn] = useState(CHURN_BASELINE_SNAPSHOT);
-  const [displayed, setDisplayed] = useState(CHURN_BASELINE_SNAPSHOT);
-  const animatedForTransitionRef = useRef(null);  // transitioned_at value we already animated for
-  const rafRef = useRef(0);
-
-  // Demo #3 customer drill-in — fixtures from /api/customers, plus
-  // per-customer Nemotron correlation result rendered in a modal.
+  // Customer fixtures (intents/customers/*.yaml) are the single source of
+  // truth for the entire Churn Forecast tab. The legacy /api/churn (v2 demo
+  // pre-baked cohorts of fictional consumer/MVNO subscribers) is no longer
+  // read here — every number on the tab cross-foots to the YAMLs via
+  // rollupPortfolio() above.
   const [customers, setCustomers] = useState([]);
   const [drillCustomer, setDrillCustomer] = useState(null);
   const [analysis, setAnalysis] = useState(null);
   const [analyzing, setAnalyzing] = useState(false);
-  useEffect(() => {
-    fetch(`${API}/api/customers`)
-      .then(r => r.json())
-      .then(d => setCustomers(d.customers || []))
-      .catch(() => {});
+
+  const fetchCustomers = useCallback(async () => {
+    try {
+      const r = await fetch(`${API}/api/customers`);
+      const d = await r.json();
+      setCustomers(d.customers || []);
+    } catch {}
   }, []);
+  useEffect(() => {
+    fetchCustomers();
+    const t = setInterval(fetchCustomers, 30000);
+    return () => clearInterval(t);
+  }, [fetchCustomers]);
+  // Refresh whenever an agent analyze cycle completes — health scores can
+  // shift as the agent's assess_sla_risk fires, even though the YAMLs are
+  // static today. This is the seam where live updates plug in later.
+  useEffect(() => {
+    const last = events[events.length - 1];
+    if (last?.type === "agent_status" && last.data?.status === "complete") {
+      fetchCustomers();
+    }
+  }, [events, fetchCustomers]);
+
   const runCorrelate = useCallback(async (customerId) => {
     setAnalyzing(true);
     setAnalysis(null);
@@ -3180,255 +3279,136 @@ function ChurnTab({ events }) {
     }
   }, []);
 
-  const fetchChurn = useCallback(async () => {
-    try {
-      const r = await fetch(`${API}/api/churn`);
-      const d = await r.json();
-      setChurn(d);
-    } catch {}
-  }, []);
-
-  // Fetch on mount + every 10s + on churn_updated event
-  useEffect(() => {
-    fetchChurn();
-    const t = setInterval(fetchChurn, 10000);
-    return () => clearInterval(t);
-  }, [fetchChurn]);
-  useEffect(() => {
-    const last = events[events.length - 1];
-    if (last?.type === "churn_updated") fetchChurn();
-  }, [events, fetchChurn]);
-
-  // Animation / snap decision whenever churn state changes.
-  useEffect(() => {
-    if (!churn) return;
-    // Cancel any in-flight animation first (defensive — rapid reset+inject
-    // cycles shouldn't leave a zombie RAF loop writing stale values).
-    if (rafRef.current) cancelAnimationFrame(rafRef.current);
-
-    if (churn.phase === "baseline") {
-      animatedForTransitionRef.current = null;
-      setDisplayed(churn);
-      return;
-    }
-    // phase === "recovered"
-    const tsKey = churn.transitioned_at || "recovered";
-    if (animatedForTransitionRef.current === tsKey) {
-      // Already played animation for this transition. Keep current displayed.
-      setDisplayed(churn);
-      return;
-    }
-    const transitionedAt = churn.transitioned_at ? new Date(churn.transitioned_at).getTime() : 0;
-    const dt = Date.now() - transitionedAt;
-    if (dt > 8000) {
-      // Past grace window — snap. Mark as animated so we don't re-fire.
-      animatedForTransitionRef.current = tsKey;
-      setDisplayed(churn);
-      return;
-    }
-    // Within grace window → play animation from baseline to recovered.
-    animatedForTransitionRef.current = tsKey;
-    const from = CHURN_BASELINE_SNAPSHOT;
-    const to = churn;
-    const durationMs = 3000;
-    const startTs = performance.now();
-    const interp = (a, b, e) => a + (b - a) * e;
-
-    const step = (now) => {
-      const t = Math.min(1, (now - startTs) / durationMs);
-      const eased = 1 - Math.pow(1 - t, 3);  // ease-out cubic
-
-      // Interpolate cohorts (only slice-A actually changes in the recovery)
-      const nextCohorts = to.cohorts.map(toCohort => {
-        const fromCohort = from.cohorts.find(c => c.id === toCohort.id) || toCohort;
-        if (toCohort.id !== "slice-a") return toCohort;
-        return {
-          ...toCohort,
-          at_risk:         Math.round(interp(fromCohort.at_risk, toCohort.at_risk, eased)),
-          at_risk_pct:    +interp(fromCohort.at_risk_pct, toCohort.at_risk_pct, eased).toFixed(1),
-          arr_exposed_usd: Math.round(interp(fromCohort.arr_exposed_usd, toCohort.arr_exposed_usd, eased)),
-          // Status flips partway through (amber → green at ~70% progress)
-          status: eased > 0.7 ? toCohort.status : fromCohort.status,
-          // Sparkline cliff revealed at ~70%
-          sparkline: eased > 0.7 ? toCohort.sparkline : fromCohort.sparkline,
-        };
-      });
-      const nextAtRiskTotal = nextCohorts.reduce((s, c) => s + c.at_risk, 0);
-      const nextRevenue     = nextCohorts.reduce((s, c) => s + c.arr_exposed_usd, 0);
-      // Time-series: reveal the recovery drop point at ~50% progress
-      const nextSeries = eased > 0.5 ? to.time_series : from.time_series;
-
-      setDisplayed({
-        ...to,
-        cohorts: nextCohorts,
-        at_risk_total:        Math.round(interp(from.at_risk_total,        nextAtRiskTotal, 1)),
-        revenue_at_risk_usd:  Math.round(interp(from.revenue_at_risk_usd,  nextRevenue,     1)),
-        forecast_confidence:  Math.round(interp(from.forecast_confidence, to.forecast_confidence, eased)),
-        time_series:          nextSeries,
-      });
-
-      if (t < 1) rafRef.current = requestAnimationFrame(step);
-    };
-    rafRef.current = requestAnimationFrame(step);
-    return () => { if (rafRef.current) cancelAnimationFrame(rafRef.current); };
-  }, [churn]);
-
-  const handleDemoResetChurn = async () => {
-    try { await fetch(`${API}/api/churn/reset`, { method: "POST" }); } catch {}
-    await fetchChurn();
-  };
-
-  if (!displayed) return null;
-
-  const sliceAColor = "#a855f7";  // matches topology slice-A purple
-  const sliceA = displayed.cohorts.find(c => c.id === "slice-a");
-  // Only the two causally-tied metrics get delta chips. Forecast
-  // Confidence is a static baseline — no chip, no implied movement.
-  const deltaChips = {
-    at_risk: displayed.phase === "recovered" ? "▼ 409 last minute" : "▲ 47 last hour",
-    revenue: displayed.phase === "recovered" ? "▼ $1.16M last minute" : "▲ $230K last hour",
-    forecast: null,
-  };
-  const deltaColor = displayed.phase === "recovered" ? C.green : C.muted;
+  const portfolio = useMemo(() => rollupPortfolio(customers), [customers]);
+  const totals    = portfolio.totals;
 
   return (
     <>
     <div style={{ height: "100%", display: "flex", flexDirection: "column", gap: 12, padding: 12, overflow: "auto", position: "relative" }}>
 
-      {/* Subdued demo-only reset — icon only, muted, tooltip on hover */}
-      <button
-        onClick={handleDemoResetChurn}
-        title="Reset churn state (demo only)"
-        aria-label="Reset churn state (demo only)"
-        style={{
-          position: "absolute", top: 6, right: 10,
-          width: 22, height: 22, padding: 0,
-          display: "flex", alignItems: "center", justifyContent: "center",
-          fontSize: 14, lineHeight: 1,
-          background: "transparent", color: "#475569",
-          border: `1px solid ${C.border}`, borderRadius: "50%",
-          cursor: "pointer",
-          opacity: 0.35,
-          transition: "opacity 0.15s",
-        }}
-        onMouseEnter={e => e.currentTarget.style.opacity = "0.75"}
-        onMouseLeave={e => e.currentTarget.style.opacity = "0.35"}
-      >↻</button>
-
-      {/* REGION A — top summary band */}
+      {/* REGION A — KPI band, computed from /api/customers */}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, flexShrink: 0 }}>
         {[
-          { label: "At-risk subscribers",         value: fmtCount(displayed.at_risk_total), chip: deltaChips.at_risk, emphasisColor: displayed.at_risk_total > 500 ? C.yellow : C.green },
-          { label: "Revenue at risk · 30-day",    value: fmtMoney(displayed.revenue_at_risk_usd), chip: deltaChips.revenue, emphasisColor: displayed.revenue_at_risk_usd > 3_000_000 ? C.yellow : C.green },
-          { label: "Forecast confidence",         value: `${displayed.forecast_confidence}%`, chip: deltaChips.forecast, emphasisColor: C.blue },
+          {
+            label: "At-risk accounts",
+            value: `${totals.at_risk_count} of ${totals.count}`,
+            sub:   totals.count ? `${(totals.at_risk_count / totals.count * 100).toFixed(0)}% of book` : "—",
+            color: totals.critical_count > 0 ? C.red
+                 : totals.at_risk_count  > 0 ? C.orange : C.green,
+          },
+          {
+            label: "Revenue at risk · 60-day",
+            value: fmtMoney(totals.revenue_at_risk),
+            sub:   totals.total_arr ? `${totals.total_arr_at_risk_pct.toFixed(0)}% of $${(totals.total_arr/1_000_000).toFixed(1)}M total ARR` : "—",
+            color: totals.revenue_at_risk > 5_000_000 ? C.red
+                 : totals.revenue_at_risk > 1_000_000 ? C.orange : C.green,
+          },
+          {
+            label: "Critical accounts",
+            value: `${totals.critical_count}`,
+            sub:   totals.critical_count > 0
+                     ? portfolio.bands.critical
+                         .map(c => c.name).slice(0, 2).join(" · ")
+                     : "none",
+            color: totals.critical_count > 0 ? C.red : C.green,
+          },
         ].map((c, i) => (
           <div key={i} style={{
             background: C.panel, border: `1px solid ${C.border}`, borderRadius: 8,
-            borderLeft: `3px solid ${c.emphasisColor}`,
+            borderLeft: `3px solid ${c.color}`,
             padding: "14px 18px",
           }}>
             <div style={{ fontSize: FS.logBadge, color: C.muted, letterSpacing: 1, textTransform: "uppercase", marginBottom: 6 }}>{c.label}</div>
-            <div style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap" }}>
-              <span style={{ fontSize: "clamp(24px, 2.2vw, 36px)", fontWeight: 700, fontFamily: "monospace", color: C.text, transition: "color 0.4s" }}>
-                {c.value}
-              </span>
-              {c.chip && (
-                <span style={{ fontSize: FS.logBadge, fontWeight: 600, fontFamily: "monospace", color: deltaColor }}>
-                  {c.chip}
-                </span>
-              )}
+            <div style={{ fontSize: "clamp(22px, 2vw, 32px)", fontWeight: 800, fontFamily: "monospace", color: c.color, lineHeight: 1, marginBottom: 4 }}>
+              {c.value}
             </div>
+            <div style={{ fontSize: FS.logBadge, color: C.muted, fontFamily: "monospace" }}>{c.sub}</div>
           </div>
         ))}
       </div>
 
-      {/* Main two-column area: cohort table + time-series */}
-      <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 55fr) minmax(0, 45fr)", gap: 12, flex: 1, minHeight: 0 }}>
-
-        {/* REGION B — cohort breakdown */}
-        <Panel title="Cohort breakdown">
-          <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 2fr) 0.7fr 0.8fr 0.7fr 1fr 80px 0.7fr", columnGap: 10, rowGap: 6, alignItems: "center" }}>
-            {/* Header */}
-            {["Cohort", "Subscribers", "At risk", "%", "ARR exposed", "Trend", "Status"].map((h, i) => (
-              <div key={`h-${i}`} style={{ fontSize: FS.logBadge, color: C.muted, letterSpacing: 1, textTransform: "uppercase", paddingBottom: 6, borderBottom: `1px solid ${C.border}` }}>{h}</div>
-            ))}
-            {/* Rows */}
-            {displayed.cohorts.map(c => {
-              const st = CHURN_STATUS_STYLE[c.status] || CHURN_STATUS_STYLE.green;
-              const sparkColor = c.is_star ? sliceAColor : (st.fg);
-              return (
-                <Fragment key={c.id}>
-                  <div style={{
-                    fontSize: c.is_star ? FS.proposalTitle : FS.body,
-                    fontWeight: c.is_star ? 700 : 600,
-                    color: C.text,
-                    paddingLeft: c.is_star ? 8 : 0,
-                    borderLeft: c.is_star ? `3px solid ${sliceAColor}` : "3px solid transparent",
-                    padding: c.is_star ? "8px 0 8px 10px" : "7px 0",
-                    wordBreak: "break-word",
-                  }}>
-                    <div>{c.name}</div>
-                    <div style={{ fontSize: FS.logTimestamp, color: C.muted, fontWeight: 400, marginTop: 2 }}>{c.note}</div>
+      {/* REGION B — Cohort breakdown by service domain (computed) */}
+      <Panel title="Cohort breakdown · by service domain" style={{ flexShrink: 0 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "minmax(0,2fr) 0.7fr 0.7fr 0.6fr 1fr 0.8fr", columnGap: 10, rowGap: 4, alignItems: "center" }}>
+          {["Domain", "Customers", "At risk", "%", "ARR exposed", "Status"].map((h, i) => (
+            <div key={`h-${i}`} style={{ fontSize: FS.logBadge, color: C.muted, letterSpacing: 1, textTransform: "uppercase", paddingBottom: 6, borderBottom: `1px solid ${C.border}` }}>{h}</div>
+          ))}
+          {portfolio.cohorts.map(co => {
+            const stColor = co.status === "RED" ? C.red : co.status === "AMBER" ? C.orange : C.green;
+            return (
+              <Fragment key={co.id}>
+                <div style={{ padding: "8px 0", fontWeight: 600, color: C.text, borderBottom: `1px solid ${C.border}22` }}>
+                  <div>{co.label}</div>
+                  <div style={{ fontSize: FS.logTimestamp, color: C.muted, fontWeight: 400, marginTop: 2, fontFamily: "monospace" }}>
+                    {fmtMoney(co.total_arr)} total
                   </div>
-                  <div style={{ fontSize: FS.body, fontFamily: "monospace", color: C.muted }}>{fmtCount(c.subscribers_total)}</div>
-                  <div style={{ fontSize: FS.body, fontFamily: "monospace", fontWeight: 700, color: C.text, transition: "color 0.4s" }}>{fmtCount(c.at_risk)}</div>
-                  <div style={{ fontSize: FS.body, fontFamily: "monospace", color: st.fg }}>{c.at_risk_pct.toFixed(1)}%</div>
-                  <div style={{ fontSize: FS.body, fontFamily: "monospace", fontWeight: 600, color: C.text }}>{fmtMoney(c.arr_exposed_usd)}</div>
-                  <Sparkline points={c.sparkline} color={sparkColor} />
+                </div>
+                <div style={{ padding: "8px 0", fontSize: FS.body, fontFamily: "monospace", color: C.muted, borderBottom: `1px solid ${C.border}22` }}>{co.count}</div>
+                <div style={{ padding: "8px 0", fontSize: FS.body, fontFamily: "monospace", fontWeight: 700, color: co.at_risk_count > 0 ? C.orange : C.muted, borderBottom: `1px solid ${C.border}22` }}>{co.at_risk_count}</div>
+                <div style={{ padding: "8px 0", fontSize: FS.body, fontFamily: "monospace", color: co.pct_at_risk >= 50 ? C.red : co.pct_at_risk > 0 ? C.orange : C.muted, borderBottom: `1px solid ${C.border}22` }}>{co.pct_at_risk.toFixed(0)}%</div>
+                <div style={{ padding: "8px 0", fontSize: FS.body, fontFamily: "monospace", fontWeight: 700, color: co.arr_exposed > 0 ? C.text : C.muted, borderBottom: `1px solid ${C.border}22` }}>{fmtMoney(co.arr_exposed)}</div>
+                <div style={{ padding: "8px 0", borderBottom: `1px solid ${C.border}22` }}>
                   <span style={{
                     justifySelf: "start",
                     fontSize: FS.logBadge, fontWeight: 700, padding: "3px 9px", borderRadius: 4,
-                    background: st.bg, color: st.fg, fontFamily: "monospace",
-                    transition: "background 0.4s, color 0.4s",
-                  }}>
-                    {st.label}
-                  </span>
-                </Fragment>
+                    background: stColor + "22", color: stColor, fontFamily: "monospace",
+                    letterSpacing: 0.5,
+                  }}>{co.status}</span>
+                </div>
+              </Fragment>
+            );
+          })}
+        </div>
+      </Panel>
+
+      {/* REGION C — Top at-risk callout (clickable cards, drives drill-in) */}
+      {portfolio.top_at_risk.length > 0 && (
+        <div style={{
+          background: "rgba(239,68,68,0.06)",
+          border: `1px solid ${C.red}44`,
+          borderLeft: `4px solid ${C.red}`,
+          borderRadius: 8,
+          padding: 12,
+          flexShrink: 0,
+        }}>
+          <div style={{ fontSize: FS.logBadge, color: C.red, letterSpacing: 1, textTransform: "uppercase", marginBottom: 8, fontWeight: 700 }}>
+            Top accounts at risk · click to drill in
+          </div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
+            {portfolio.top_at_risk.slice(0, 3).map(c => {
+              const h = c.churn_signals?.health_score ?? 70;
+              const b = bandForHealth(h);
+              const bColor = bandColor(b.id);
+              return (
+                <div
+                  key={c.id}
+                  onClick={() => { setDrillCustomer(c); setAnalysis(null); }}
+                  style={{
+                    flex: "1 1 240px", minWidth: 0,
+                    padding: "10px 14px",
+                    border: `1px solid ${bColor}66`,
+                    borderRadius: 6,
+                    background: "rgba(255,255,255,0.03)",
+                    cursor: "pointer",
+                    transition: "background 0.15s",
+                  }}
+                  onMouseEnter={e => e.currentTarget.style.background = "rgba(255,255,255,0.07)"}
+                  onMouseLeave={e => e.currentTarget.style.background = "rgba(255,255,255,0.03)"}
+                >
+                  <div style={{ fontSize: FS.body, fontWeight: 700, color: C.text }}>{c.name}</div>
+                  <div style={{ fontSize: FS.logBadge, color: C.muted, fontFamily: "monospace", marginTop: 2 }}>
+                    {DOMAIN_LABELS[c.service?.type] || c.service?.type} · {c.service?.id}
+                  </div>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", fontSize: FS.logBadge, fontFamily: "monospace", marginTop: 6, gap: 8 }}>
+                    <span style={{ color: C.text, fontWeight: 700 }}>{fmtMoney(c.arr_usd || 0)}</span>
+                    <span style={{ color: bColor, fontWeight: 700 }}>{b.icon} {b.label}</span>
+                  </div>
+                </div>
               );
             })}
           </div>
-        </Panel>
-
-        {/* REGION C — time series */}
-        <Panel title="Slice-A Enterprise · at-risk subscribers over time">
-          <div style={{ display: "flex", flexDirection: "column", height: "100%", gap: 10 }}>
-            <div style={{ fontSize: FS.logBadge, color: C.muted }}>last 24 hours · live</div>
-            <div style={{ flex: 1, minHeight: 180 }}>
-              <AtRiskTimeSeries data={displayed.time_series} sliceAColor={sliceAColor} />
-            </div>
-          </div>
-        </Panel>
-      </div>
-
-      {/* REGION D — revenue callout band */}
-      <div style={{
-        background: "rgba(168,85,247,0.06)",
-        border: `1px solid ${sliceAColor}44`,
-        borderLeft: `4px solid ${sliceAColor}`,
-        borderRadius: 8,
-        padding: "12px 18px",
-        display: "flex", alignItems: "center", gap: 18,
-        flexShrink: 0, flexWrap: "wrap",
-      }}>
-        <div style={{ fontSize: FS.logBadge, color: C.muted, letterSpacing: 1, textTransform: "uppercase" }}>
-          Star cohort
         </div>
-        <div style={{ fontSize: FS.proposalTitle, fontWeight: 700, color: C.text }}>
-          {displayed.callout?.cohort || "slice-A Enterprise"}
-        </div>
-        <div style={{ fontSize: FS.body, color: C.muted }}>·</div>
-        <div style={{ fontSize: FS.body, fontFamily: "monospace", color: C.text }}>
-          {fmtCount(displayed.callout?.subscribers || 842)} subscribers
-        </div>
-        <div style={{ fontSize: FS.body, color: C.muted }}>·</div>
-        <div style={{ fontSize: FS.body, fontFamily: "monospace", fontWeight: 700, color: C.text }}>
-          {fmtMoney(displayed.callout?.arr_usd || 2_400_000)} ARR
-        </div>
-        <div style={{ fontSize: FS.body, color: C.muted }}>·</div>
-        <div style={{ fontSize: FS.body, fontFamily: "monospace", color: C.text }}>
-          SLA: {displayed.callout?.sla_commitment || "15ms N3 one-way"}
-        </div>
-      </div>
+      )}
 
       {/* REGION E — per-customer drill-in (Demo #3 vertical slice) */}
       <div style={{ background: "rgba(255,255,255,0.02)", border: `1px solid ${C.border}`, borderRadius: 8, padding: 12, flexShrink: 0 }}>

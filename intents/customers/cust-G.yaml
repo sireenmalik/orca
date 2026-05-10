@@ -30,4 +30,4 @@ churn_signals:
   open_tickets_p1: 0
   latency_complaints_30d: 1
   competitor_active: true                   # Comcast Business circling
-  health_score: 64
+  health_score: 66                          # watch band (65-79); was 64
