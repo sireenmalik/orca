@@ -1,0 +1,33 @@
+# Risk profile: HEALTHY — gov subcontractor on optical wavelength
+id: cust-K
+name: Trident Defense Communications
+segment: strategic
+industry: gov-defense
+headline_use_case: >
+  Dedicated 100G wavelength carrying classified-tier secure mobile
+  data between two regional fusion centres. Encrypted at L1; ORCA
+  reads only out-of-band optical telemetry (BER, OSNR, attenuation).
+arr_usd: 670000
+account_exec: Sarah Chen
+contract:
+  sla_tier: platinum
+  signed: 2025-08-30
+  renewal_date: 2027-08-30
+  contract_value_at_renewal_usd: 670000
+service:
+  type: optical-wave
+  id: wave-dc-sfo-001                       # Washington-DC ↔ San Francisco
+  underlay: direct-fiber                    # no MPLS underlay; L1 path
+sla_targets:
+  availability_pct: 99.999
+  p99_n3_latency_ms: 65                     # transcontinental fibre baseline
+  jitter_ms: 2
+  packet_loss_pct: 0.0001
+churn_signals:
+  previous_nps: 9
+  recent_nps: 9
+  nps_drop_quarters: 0
+  open_tickets_p1: 0
+  latency_complaints_30d: 0
+  competitor_active: false
+  health_score: 95

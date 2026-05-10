@@ -1,0 +1,33 @@
+# Risk profile: WATCH — minor signal, no urgency
+id: cust-E
+name: Quorum Collaboration
+segment: enterprise
+industry: saas-collab
+headline_use_case: >
+  Video-conferencing SaaS backbone — media-server-to-edge transit
+  for a customer base concentrated in the US Northeast and EU-West.
+  Quality is dominated by jitter, not raw latency.
+arr_usd: 410000
+account_exec: Aisha Okonkwo
+contract:
+  sla_tier: silver
+  signed: 2025-05-30
+  renewal_date: 2027-05-30
+  contract_value_at_renewal_usd: 410000
+service:
+  type: mpls-l3vpn                          # backbone media transit
+  id: l3vpn-quorum-001
+  underlay: LSP-2
+sla_targets:
+  availability_pct: 99.9
+  p99_n3_latency_ms: 60
+  jitter_ms: 10
+  packet_loss_pct: 0.05
+churn_signals:
+  previous_nps: 8
+  recent_nps: 7
+  nps_drop_quarters: 1
+  open_tickets_p1: 0
+  latency_complaints_30d: 1
+  competitor_active: false
+  health_score: 71

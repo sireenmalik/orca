@@ -1,0 +1,49 @@
+# Authored by: BSS / TMF921-style customer intent
+#   (mocked for lab; replace with real BSS fetch in production)
+# Schema version: nimo-internal v1 (pre-TMF921 mapping)
+# Risk profile: CRITICAL — flagship demo save (Act 1 + Act 2 breach this slice)
+
+id: cust-A
+name: Helix Robotics
+segment: strategic                          # platinum tier — top revenue cohort
+industry: industrial-iot
+headline_use_case: >
+  Real-time control-loop telemetry for tier-1 automotive plant —
+  predictive-maintenance ML fed by continuous joint-position streams
+  from 1,200 robotic cells across two production lines. 15 ms p99
+  budget on the slice; sustained breach triggers conservative-mode
+  rollback on the line and pauses the predictive-maintenance training
+  pipeline.
+
+arr_usd: 2400000
+account_exec: Sarah Chen
+
+contract:
+  sla_tier: platinum
+  signed: 2024-10-15
+  renewal_date: 2026-07-15                  # ~67 days out — inside pressure window
+  contract_value_at_renewal_usd: 2400000
+  early_termination_penalty_usd: 480000
+
+service:
+  type: 5g-private-slice                    # private 5G campus slice
+  id: slice-A                               # 3GPP slice id; breaches in both demo Acts
+  underlay: LSP-1                           # mapped onto MPLS LSP-1 — cross-domain link
+
+sla_targets:
+  availability_pct: 99.99
+  p99_n3_latency_ms: 15
+  jitter_ms: 3
+  packet_loss_pct: 0.001
+
+churn_signals:
+  previous_nps: 8                           # last quarter
+  recent_nps: 5                             # current — 3-pt drop
+  nps_drop_quarters: 1
+  open_tickets_p1: 1                        # ticket #INC-2026-04-28-LINE-STOP
+  latency_complaints_30d: 4
+  competitor_active: true                   # Vodafone Business mid-courting
+  recent_escalation: >
+    Plant Director emailed CRO 2026-05-02 citing two production-line
+    rollbacks in the prior week correlated with N3 latency excursions.
+  health_score: 38                          # 0-100, lower = worse

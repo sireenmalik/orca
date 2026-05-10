@@ -1,0 +1,33 @@
+# Risk profile: HEALTHY — small fintech payment gateway on MPLS L3VPN
+id: cust-I
+name: Aurora Financial Services
+segment: enterprise
+industry: fintech-payments
+headline_use_case: >
+  Card-not-present payment gateway connecting 1,400 e-commerce
+  merchants to four card-network endpoints. Steady traffic, well
+  inside SLA; growth-mode account.
+arr_usd: 220000
+account_exec: Priya Patel
+contract:
+  sla_tier: gold
+  signed: 2025-11-01
+  renewal_date: 2027-11-01
+  contract_value_at_renewal_usd: 220000
+service:
+  type: mpls-l3vpn
+  id: l3vpn-aurora-001
+  underlay: LSP-2
+sla_targets:
+  availability_pct: 99.95
+  p99_n3_latency_ms: 30
+  jitter_ms: 4
+  packet_loss_pct: 0.005
+churn_signals:
+  previous_nps: 9
+  recent_nps: 9
+  nps_drop_quarters: 0
+  open_tickets_p1: 0
+  latency_complaints_30d: 0
+  competitor_active: false
+  health_score: 91

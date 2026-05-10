@@ -1,0 +1,51 @@
+# Authored by: BSS / TMF921-style customer intent
+#   (mocked for lab; replace with real BSS fetch in production)
+# Schema version: nimo-internal v1 (pre-TMF921 mapping)
+# Risk profile: CRITICAL — second flagship demo save
+
+id: cust-B
+name: Meridian Capital Markets
+segment: strategic
+industry: financial-trading
+headline_use_case: >
+  Multi-asset high-frequency order routing across US equities, fixed
+  income, and FX venues from the Secaucus colocation cage. Sub-250 µs
+  p99 budget on the colo-to-exchange-gateway hop for ICE, CME, and
+  NYSE; tail latency directly impacts fill quality and slip cost.
+  Sustained 350 µs+ spikes above the 250 µs target show up as
+  measurable adverse selection on the trading desk's daily P&L
+  attribution.
+
+arr_usd: 3100000
+account_exec: Marcus Rivera
+
+contract:
+  sla_tier: platinum
+  signed: 2025-01-20
+  renewal_date: 2026-06-30                  # ~52 days out — most urgent
+  contract_value_at_renewal_usd: 3100000
+  early_termination_penalty_usd: 620000
+
+service:
+  type: mpls-l3vpn                          # premium MPLS L3VPN over dark fiber
+  id: l3vpn-meridian-001
+  underlay: LSP-1                           # same LSP as cust-A — both feel the same transport event
+
+sla_targets:
+  availability_pct: 99.999                  # five-nines, HFT-grade
+  p99_n3_latency_ms: 0.25                   # 250 µs — HFT colo-to-gateway hop
+  jitter_ms: 0.05                           # 50 µs jitter ceiling
+  packet_loss_pct: 0.0001
+
+churn_signals:
+  previous_nps: 9
+  recent_nps: 6                             # 3-pt drop
+  nps_drop_quarters: 1
+  open_tickets_p1: 2                        # INC-2026-04-22, INC-2026-05-04
+  latency_complaints_30d: 5
+  competitor_active: true                   # niche low-latency carrier (Hudson Networks) sniffing
+  recent_escalation: >
+    Head of Electronic Trading filed formal SLA breach notice
+    2026-05-05 referencing two latency-spike windows correlated
+    with adverse fill-rate degradation on the equities desk.
+  health_score: 31

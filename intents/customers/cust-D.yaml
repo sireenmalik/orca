@@ -1,0 +1,50 @@
+# Risk profile: AT-RISK — clean transport (LSP-2), but lingering trust deficit
+#   from a Q1 outage, a billing dispute, and a competitor circling.
+#   Distinct cause from cust-C — proves the agent isn't pattern-matching on
+#   one root cause to explain every at-risk customer.
+id: cust-D
+name: Northbridge Imaging
+segment: enterprise
+industry: healthcare
+headline_use_case: >
+  Clinical imaging upload from 18 regional hospitals to a cloud
+  rendering and AI-triage pipeline. HIPAA-bounded; audit-tail latency
+  on the upload path matters more than peak throughput. Network is
+  currently performing inside SLA — risk is non-technical.
+arr_usd: 580000
+account_exec: David Kim
+contract:
+  sla_tier: gold
+  signed: 2025-02-15
+  renewal_date: 2027-02-28
+  contract_value_at_renewal_usd: 580000
+  early_termination_penalty_usd: 116000
+service:
+  type: mpls-l3vpn
+  id: l3vpn-northbridge-001
+  underlay: LSP-2                           # HEALTHY path — not in breach this cycle
+sla_targets:
+  availability_pct: 99.95
+  p99_n3_latency_ms: 50
+  jitter_ms: 8
+  packet_loss_pct: 0.005
+churn_signals:
+  previous_nps: 8
+  recent_nps: 6                             # 2-pt drop, sustained for 2 quarters
+  nps_drop_quarters: 2                      # has not recovered since Q1 outage
+  open_tickets_p1: 0
+  resolved_p1_last_90d:                     # echoes from a 4-hour weekend outage
+    - id: INC-2026-03-22
+      duration_min: 247
+      window: "Sat 02:00–06:07 PT — peak imaging upload window"
+      sla_credit_owed_usd: 38000
+  latency_complaints_30d: 1                 # mild — not the real driver
+  competitor_active: true                   # AT&T offering a HIPAA-bundled alternative
+  billing_dispute_open: true                # SLA credits from INC-2026-03-22 contested
+  recent_escalation: >
+    CIO raised the unresolved billing credit + slow-recovery NPS
+    on the QBR call 2026-04-25. Renewal is far out (2027-02-28),
+    but their CRO has flagged that AT&T's HIPAA bundle is being
+    actively quoted. Risk vector is trust + commercial, not
+    transport — the L3VPN itself is performing within SLA.
+  health_score: 56

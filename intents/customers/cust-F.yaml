@@ -1,0 +1,34 @@
+# Risk profile: WATCH — 5G eMBB on slice-B, mild SLA pressure
+id: cust-F
+name: Cascade Grid Analytics
+segment: enterprise
+industry: smart-grid
+headline_use_case: >
+  Smart-meter telemetry aggregation for a Pacific-Northwest utility —
+  4-million-meter rollout, 15-minute interval reads with a daily
+  predictive-load model run on the aggregated stream. Rides the public
+  5G eMBB slice for the LTE-M backhaul portion.
+arr_usd: 390000
+account_exec: Sarah Chen
+contract:
+  sla_tier: silver
+  signed: 2025-12-15
+  renewal_date: 2026-12-15
+  contract_value_at_renewal_usd: 390000
+service:
+  type: 5g-embb-slice
+  id: slice-B
+  underlay: LSP-2
+sla_targets:
+  availability_pct: 99.9
+  p99_n3_latency_ms: 100
+  jitter_ms: 15
+  packet_loss_pct: 0.05
+churn_signals:
+  previous_nps: 8
+  recent_nps: 7
+  nps_drop_quarters: 1
+  open_tickets_p1: 0
+  latency_complaints_30d: 1
+  competitor_active: false
+  health_score: 68

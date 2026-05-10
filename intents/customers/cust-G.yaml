@@ -1,0 +1,33 @@
+# Risk profile: WATCH — 5G eMBB livestream tenant, NPS dip
+id: cust-G
+name: Streamline Media
+segment: enterprise
+industry: media-streaming
+headline_use_case: >
+  Mobile-first livestream platform for sports and concert events.
+  Peak load is bursty and concentrated on event nights — quality
+  hinges on jitter and packet-loss tolerance during the surge.
+arr_usd: 310000
+account_exec: Marcus Rivera
+contract:
+  sla_tier: silver
+  signed: 2025-07-20
+  renewal_date: 2027-07-20
+  contract_value_at_renewal_usd: 310000
+service:
+  type: 5g-embb-slice
+  id: slice-B
+  underlay: LSP-2
+sla_targets:
+  availability_pct: 99.9
+  p99_n3_latency_ms: 80
+  jitter_ms: 12
+  packet_loss_pct: 0.05
+churn_signals:
+  previous_nps: 7
+  recent_nps: 6
+  nps_drop_quarters: 1
+  open_tickets_p1: 0
+  latency_complaints_30d: 1
+  competitor_active: true                   # Comcast Business circling
+  health_score: 64
