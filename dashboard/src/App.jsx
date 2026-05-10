@@ -3154,6 +3154,32 @@ function ChurnTab({ events }) {
   const animatedForTransitionRef = useRef(null);  // transitioned_at value we already animated for
   const rafRef = useRef(0);
 
+  // Demo #3 customer drill-in — fixtures from /api/customers, plus
+  // per-customer Nemotron correlation result rendered in a modal.
+  const [customers, setCustomers] = useState([]);
+  const [drillCustomer, setDrillCustomer] = useState(null);
+  const [analysis, setAnalysis] = useState(null);
+  const [analyzing, setAnalyzing] = useState(false);
+  useEffect(() => {
+    fetch(`${API}/api/customers`)
+      .then(r => r.json())
+      .then(d => setCustomers(d.customers || []))
+      .catch(() => {});
+  }, []);
+  const runCorrelate = useCallback(async (customerId) => {
+    setAnalyzing(true);
+    setAnalysis(null);
+    try {
+      const r = await fetch(`${API}/api/customers/${customerId}/correlate`, { method: "POST" });
+      const d = await r.json();
+      setAnalysis(d);
+    } catch (e) {
+      setAnalysis({ error: String(e) });
+    } finally {
+      setAnalyzing(false);
+    }
+  }, []);
+
   const fetchChurn = useCallback(async () => {
     try {
       const r = await fetch(`${API}/api/churn`);
@@ -3266,6 +3292,7 @@ function ChurnTab({ events }) {
   const deltaColor = displayed.phase === "recovered" ? C.green : C.muted;
 
   return (
+    <>
     <div style={{ height: "100%", display: "flex", flexDirection: "column", gap: 12, padding: 12, overflow: "auto", position: "relative" }}>
 
       {/* Subdued demo-only reset — icon only, muted, tooltip on hover */}
@@ -3402,7 +3429,134 @@ function ChurnTab({ events }) {
           SLA: {displayed.callout?.sla_commitment || "15ms N3 one-way"}
         </div>
       </div>
+
+      {/* REGION E — per-customer drill-in (Demo #3 vertical slice) */}
+      <div style={{ background: "rgba(255,255,255,0.02)", border: `1px solid ${C.border}`, borderRadius: 8, padding: 12, flexShrink: 0 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 10 }}>
+          <span style={{ fontSize: FS.logBadge, color: C.muted, letterSpacing: 1, textTransform: "uppercase" }}>
+            Customer Portfolio
+          </span>
+          <span style={{ fontSize: FS.logBadge, color: C.muted, fontStyle: "italic" }}>
+            click any row → AI causal explanation (Nemotron, low_effort)
+          </span>
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 8 }}>
+          {customers.map(c => {
+            const npsPrev = c.churn_signals?.previous_nps;
+            const npsNow  = c.churn_signals?.recent_nps;
+            const npsDelta = (npsPrev != null && npsNow != null) ? npsNow - npsPrev : null;
+            const health  = c.churn_signals?.health_score ?? 70;
+            const healthColor = health >= 80 ? C.green : health >= 65 ? C.yellow : health >= 45 ? C.orange : C.red;
+            return (
+              <div
+                key={c.id}
+                onClick={() => { setDrillCustomer(c); setAnalysis(null); }}
+                style={{
+                  padding: 10, borderRadius: 6,
+                  background: "rgba(255,255,255,0.02)",
+                  border: `1px solid ${C.border}`,
+                  borderLeft: `3px solid ${healthColor}`,
+                  cursor: "pointer",
+                  transition: "background 0.15s",
+                }}
+                onMouseEnter={e => e.currentTarget.style.background = "rgba(255,255,255,0.06)"}
+                onMouseLeave={e => e.currentTarget.style.background = "rgba(255,255,255,0.02)"}
+              >
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8 }}>
+                  <span style={{ fontSize: FS.body, fontWeight: 700, color: C.text, lineHeight: 1.2 }}>{c.name}</span>
+                  <span style={{ fontSize: FS.logBadge, color: C.muted, fontFamily: "monospace" }}>{c.id}</span>
+                </div>
+                <div style={{ fontSize: FS.logBadge, color: C.muted, fontFamily: "monospace", marginTop: 3 }}>
+                  {(c.service?.type || "?")} · {(c.service?.id || "")}
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginTop: 6, fontSize: FS.logBadge, fontFamily: "monospace", gap: 8 }}>
+                  <span style={{ color: C.text }}>{fmtMoney(c.arr_usd || 0)}</span>
+                  {npsDelta != null && (
+                    <span style={{ color: npsDelta < 0 ? C.red : npsDelta > 0 ? C.green : C.muted }}>
+                      NPS {npsPrev}→{npsNow}
+                    </span>
+                  )}
+                  <span style={{ color: healthColor, fontWeight: 700 }}>health {health}</span>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
     </div>
+
+    {drillCustomer && (
+      <Modal title={`${drillCustomer.name} · AI churn analysis`} onClose={() => setDrillCustomer(null)} width="780px">
+        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          <div style={{ fontSize: FS.body, color: C.muted, lineHeight: 1.55 }}>
+            <div><strong style={{ color: C.text }}>{drillCustomer.id}</strong> · {drillCustomer.segment} · {drillCustomer.industry}</div>
+            <div>{drillCustomer.service?.type} · {drillCustomer.service?.id} (underlay: {drillCustomer.service?.underlay})</div>
+            <div>AE: <strong style={{ color: C.text }}>{drillCustomer.account_exec}</strong> · ARR: {fmtMoney(drillCustomer.arr_usd || 0)} · Renewal: {drillCustomer.contract?.renewal_date}</div>
+            <div style={{ marginTop: 8, fontStyle: "italic", color: C.text }}>{drillCustomer.headline_use_case}</div>
+          </div>
+
+          {!analysis && !analyzing && (
+            <button
+              onClick={() => runCorrelate(drillCustomer.id)}
+              style={{
+                padding: "10px 18px", fontSize: FS.body, fontWeight: 700,
+                borderRadius: 6, background: C.blue + "22", color: C.blue,
+                border: `1px solid ${C.blue}66`, cursor: "pointer", alignSelf: "flex-start",
+              }}
+            >▸ Run Nemotron analysis (low_effort)</button>
+          )}
+
+          {analyzing && (
+            <div style={{ fontSize: FS.body, color: C.muted, padding: 12, fontStyle: "italic" }}>
+              Calling Nemotron with low_effort reasoning · ~2-3 s expected…
+            </div>
+          )}
+
+          {analysis && !analysis.error && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              <div style={{ display: "flex", gap: 14, alignItems: "baseline" }}>
+                <span style={{
+                  fontSize: 36, fontWeight: 800, fontFamily: "monospace", lineHeight: 1,
+                  color: (analysis.churn_pct ?? 0) >= 60 ? C.red
+                       : (analysis.churn_pct ?? 0) >= 30 ? C.orange : C.green,
+                }}>{analysis.churn_pct != null ? `${analysis.churn_pct}%` : "—"}</span>
+                <span style={{ fontSize: FS.body, color: C.muted }}>churn probability · 60-day window</span>
+              </div>
+              <div style={{ background: "rgba(255,255,255,0.04)", padding: 12, borderRadius: 6 }}>
+                <div style={{ fontSize: FS.logBadge, color: C.muted, letterSpacing: 1, textTransform: "uppercase", marginBottom: 6 }}>Executive summary</div>
+                <div style={{ fontSize: FS.body, color: C.text, lineHeight: 1.55 }}>{analysis.executive_summary}</div>
+              </div>
+              {analysis.risk_drivers && analysis.risk_drivers.length > 0 && (
+                <div>
+                  <div style={{ fontSize: FS.logBadge, color: C.muted, letterSpacing: 1, textTransform: "uppercase", marginBottom: 6 }}>Risk drivers</div>
+                  <ul style={{ margin: 0, paddingLeft: 22, fontSize: FS.body, color: C.text, lineHeight: 1.6 }}>
+                    {analysis.risk_drivers.map((d, i) => <li key={i}>{d}</li>)}
+                  </ul>
+                </div>
+              )}
+              {analysis.recommended_action && (
+                <div style={{ background: C.green + "12", padding: 12, borderRadius: 6, borderLeft: `3px solid ${C.green}` }}>
+                  <div style={{ fontSize: FS.logBadge, color: C.green, letterSpacing: 1, textTransform: "uppercase", marginBottom: 4, fontWeight: 700 }}>Recommended action</div>
+                  <div style={{ fontSize: FS.body, color: C.text, lineHeight: 1.5 }}>{analysis.recommended_action}</div>
+                </div>
+              )}
+              {analysis._parse_error && (
+                <div style={{ fontSize: FS.logBadge, color: C.yellow, fontStyle: "italic" }}>
+                  ⚠ {analysis._parse_error}
+                </div>
+              )}
+            </div>
+          )}
+
+          {analysis && analysis.error && (
+            <div style={{ background: C.red + "18", padding: 12, borderRadius: 6, fontSize: FS.body, color: C.red, fontFamily: "monospace", border: `1px solid ${C.red}44` }}>
+              {analysis.error}
+            </div>
+          )}
+        </div>
+      </Modal>
+    )}
+  </>
   );
 }
 
