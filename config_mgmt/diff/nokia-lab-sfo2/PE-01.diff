@@ -1,0 +1,11 @@
+# ORCA Config Proposal — PE-01
+# Generated: 2026-05-10T04:42:28.331905Z
+# Incident: QER state shows drift: enforced rate 32 Mbps < intent 50 Mbps, causing potential latency increase and SLA breach risk.
+# Branch: cfg/PE-01-20260510-044227
+
+configure router isis 0
+    interface "unknown"
+-       metric ?
++       metric ?
+    exit
+exit
