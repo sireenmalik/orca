@@ -158,8 +158,16 @@ async def reset_network():
     await v2_scenarios.stop(manager.broadcast, reset_baseline_if_requested=False,
                              reset_baseline=_reset_to_baseline)
     _reset_to_baseline()
-    v2_proposals.clear_proposals()
-    clear_emails()           # v1 email queue (baseline test compat)
+    v2_proposals.clear_proposals()      # v2 demo proposals (the scripted Acts)
+    clear_proposals()                    # AGENT's _config_proposals (real propose_config_change)
+    clear_security_alerts()              # AGENT's _security_alerts
+    agent.reset_fault_signature()        # AGENT's dedup state + proposal_approved flag
+    # Also clear the cycle artifact pointers so the next cycle's emails
+    # don't carry stale PR/episode URLs into a fresh fault.
+    agent._cycle_pr_url = ""
+    agent._cycle_pr_number = None
+    agent._cycle_episode_url = ""
+    clear_emails()           # agent email queue (notifications.py)
     v2_emails.clear_all()    # v2 outbox — drafts + sent
     churn_state.reset()
     await manager.broadcast({
