@@ -66,13 +66,13 @@ SCENARIOS = {
                 "id":          "info-slice-a-p99-trend",
                 "severity":    "info",
                 "node":        "UPF-01",
-                "description": "Slice-A p99 trend slope suggests SLA breach within 4 minutes",
+                "description": "Slice-A p99 trend slope suggests SLA breach within ~10 minutes",
                 "source":      "ORCA",
             }},
         ],
         "agent_context": (
             "An info-level alarm on UPF-01 reports that the slice-A p99 N3 latency "
-            "trend slope projects an SLA breach within ~4 minutes. SLA is 15 ms; "
+            "trend slope projects an SLA breach within ~10 minutes. SLA is 15 ms; "
             "current p99 is 13.0 ms. No transport alarm is present.\n\n"
             "Investigate the root cause across UPF-local state (get_qer_state, "
             "get_slice_metrics) and transport telemetry (get_link_utilization, "

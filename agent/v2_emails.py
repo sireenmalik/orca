@@ -252,7 +252,7 @@ def build_act1_email(proposal: dict) -> dict:
         f"slice-A enterprise cohort (842 accounts, $2.4M ARR). Slice-A priority "
         f"class was enforcing 32 Mbps against a committed GBR of 50 Mbps — a 36% "
         f"shortfall. p99 N3 latency was climbing toward the 15 ms SLA threshold, "
-        f"with projected breach in approximately 4 minutes.\n\n"
+        f"with projected breach in approximately 10 minutes.\n\n"
 
         f"ORCA composed a single-change restoration: QER update on UPF-01 "
         f"restoring slice-A priority class to the committed GBR of 50 Mbps with "
