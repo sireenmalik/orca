@@ -29,6 +29,8 @@ import asyncio
 from datetime import datetime
 from typing import Optional
 
+from agent import customer_intents
+
 
 # ─── Scenario definitions ────────────────────────────────────────────────────
 
@@ -45,6 +47,10 @@ SCENARIOS = {
         "short_label":       "Slice-A QoS drift",
         "description":       "QER drift on UPF-01 slice-A priority class: enforced 32 Mbps vs committed 50 Mbps GBR.",
         "duration_seconds":  45,
+        # Customers whose risk profile flips to under-fault on inject. Only
+        # cust-A (Helix Robotics) rides slice-A; the QER drift hits them
+        # specifically. Other LSP-1 tenants are unaffected by this fault.
+        "impacted_customers": ["cust-A"],
         "state_changes": [
             # QER drift: enforced rate sits 36% below committed GBR.
             {"target": "qer_state.UPF-01.slice-A", "op": "set",
@@ -84,6 +90,11 @@ SCENARIOS = {
         "short_label":       "Transport congestion (UPF innocent)",
         "description":       "PE-01↔P-02 at 93% with microbursts. UPF/SMF/AMF healthy — fault is upstream of Nokia scope.",
         "duration_seconds":  60,
+        # The cross-domain demo moment: three tenants ride LSP-1 — Helix
+        # Robotics (5G slice-A), Meridian Capital Markets (MPLS L3VPN),
+        # Larkspur Markets (MPLS L3VPN). Same physical congestion event,
+        # three customer-specific narratives.
+        "impacted_customers": ["cust-A", "cust-B", "cust-C"],
         "state_changes": [
             {"target": "link_util.PE-01-P-02",              "op": "set", "value": 93.0},
             {"target": "link_flags.PE-01-P-02.microbursts", "op": "set", "value": True},
@@ -195,6 +206,19 @@ async def _play(scenario: dict, broadcast, adapter, agent) -> None:
                 "duration_seconds": scenario["duration_seconds"],
             },
         })
+
+        # 1b. Mark the scenario's impacted customers as under-fault. They
+        # will now show their YAML fixture (under-fault) values; everyone
+        # else stays at baseline. The Churn donut + Customer Portfolio
+        # cards refetch on customer_state_changed and rerender.
+        impacted = scenario.get("impacted_customers", [])
+        if impacted:
+            customer_intents.set_impacted(impacted)
+            await broadcast({
+                "type":      "customer_state_changed",
+                "timestamp": datetime.utcnow().isoformat(),
+                "data": {"impacted": list(impacted), "scenario_id": scenario["id"]},
+            })
 
         # 2. Inject the real fault state into the adapter.
         for patch in scenario.get("state_changes", []):

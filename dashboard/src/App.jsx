@@ -262,7 +262,13 @@ function ChurnMeter({ events }) {
   }, [fetchCustomers]);
   useEffect(() => {
     const last = events[events.length - 1];
-    if (last?.type === "agent_status" && last.data?.status === "complete") {
+    if (!last) return;
+    // Refetch on cycle complete OR on explicit demo state transitions
+    // (reset / scenario inject / save) so the donut animates with state.
+    if (
+      (last.type === "agent_status" && last.data?.status === "complete") ||
+      last.type === "customer_state_changed"
+    ) {
       fetchCustomers();
     }
   }, [events, fetchCustomers]);
@@ -3255,12 +3261,17 @@ function ChurnTab({ events }) {
     const t = setInterval(fetchCustomers, 30000);
     return () => clearInterval(t);
   }, [fetchCustomers]);
-  // Refresh whenever an agent analyze cycle completes — health scores can
-  // shift as the agent's assess_sla_risk fires, even though the YAMLs are
-  // static today. This is the seam where live updates plug in later.
+  // Refresh on agent cycle complete OR on explicit demo state transitions
+  // (customer_state_changed fires from /api/demo/reset, scenario inject,
+  // and end of stream_approval). This is what animates the Customer
+  // Portfolio cards through the fault → save → reset arc.
   useEffect(() => {
     const last = events[events.length - 1];
-    if (last?.type === "agent_status" && last.data?.status === "complete") {
+    if (!last) return;
+    if (
+      (last.type === "agent_status" && last.data?.status === "complete") ||
+      last.type === "customer_state_changed"
+    ) {
       fetchCustomers();
     }
   }, [events, fetchCustomers]);

@@ -167,9 +167,15 @@ async def reset_network():
     agent._cycle_pr_url = ""
     agent._cycle_pr_number = None
     agent._cycle_episode_url = ""
-    clear_emails()           # agent email queue (notifications.py)
-    v2_emails.clear_all()    # v2 outbox — drafts + sent
+    clear_emails()                       # agent email queue (notifications.py)
+    v2_emails.clear_all()                # v2 outbox — drafts + sent
+    customer_intents.clear_impacted()    # customers return to baseline (healthy)
     churn_state.reset()
+    await manager.broadcast({
+        "type":      "customer_state_changed",
+        "timestamp": datetime.utcnow().isoformat(),
+        "data":      {"impacted": [], "reason": "demo_reset"},
+    })
     await manager.broadcast({
         "type": "churn_updated",
         "timestamp": datetime.utcnow().isoformat(),
@@ -925,6 +931,16 @@ Actions taken:
             "type": "agent_status", "timestamp": datetime.utcnow().isoformat(),
             "data": {"status": "complete",
                      "message": f"✅ Incident closed — PR #{pr_number} | Episode {episode_id} | Config deployed to {routers_str}"}
+        })
+
+        # The save: clear the under-fault marker so the impacted customers
+        # return to baseline (healthy) on the dashboard. This is the "save"
+        # animating in the Customer Portfolio + Churn Risk donut.
+        customer_intents.clear_impacted()
+        await manager.broadcast({
+            "type":      "customer_state_changed",
+            "timestamp": datetime.utcnow().isoformat(),
+            "data":      {"impacted": [], "reason": "config_deployed"},
         })
 
     asyncio.create_task(stream_approval())
