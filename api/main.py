@@ -16,6 +16,8 @@ from agent import v2_proposals
 from agent import scenarios as v2_scenarios
 from agent import churn_state
 from agent import v2_emails
+from agent import customer_intents
+from agent import churn_correlator
 
 adapter = ContainerlabAdapter()
 agent = ORCAAgent(adapter=adapter)
@@ -69,6 +71,28 @@ async def websocket_endpoint(ws: WebSocket):
 # ── State ─────────────────────────────────────────────────────────────────────
 @app.get("/api/health")
 async def health(): return {"status": "ok", "service": "ORCA"}
+
+# ── Customer intents (Demo #3 — drill-in) ─────────────────────────────────────
+@app.get("/api/customers")
+async def list_customers():
+    """All customer fixtures, list-of-dicts. Source: intents/customers/*.yaml
+    today; will be a TMF921 / BSS-API fetch in production."""
+    return {"customers": customer_intents.get_customers()}
+
+@app.get("/api/customers/{customer_id}")
+async def get_customer(customer_id: str):
+    c = customer_intents.get_by_id(customer_id)
+    if not c:
+        return {"error": "not found", "customer_id": customer_id}
+    return c
+
+@app.post("/api/customers/{customer_id}/correlate")
+async def correlate_customer(customer_id: str):
+    """Trigger Nemotron (low_effort) to produce a per-customer churn-risk
+    causal explanation. The agent reads the customer's profile + the live
+    network telemetry on their service underlay and returns a structured
+    JSON: churn_pct, risk_drivers, recommended_action, executive_summary."""
+    return await churn_correlator.correlate(customer_id, agent)
 
 @app.get("/api/state")
 async def get_state():
