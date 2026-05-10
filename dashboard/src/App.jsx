@@ -3838,7 +3838,9 @@ export default function App() {
   const [state, setState] = useState({ nodes: {}, links: {}, lsps: {}, alarms: [] });
   // Events start with a single pre-seeded Act 3 ALERT (~3h ago). Reset
   // filters back to just the pre-seed; WebSocket events accumulate on top.
-  const [events, setEvents] = useState([PRE_SEEDED_ALERT]);
+  // Reasoning log starts empty on the NIMO branch — the v2 demo's
+  // Act 3 PRE_SEEDED_ALERT is no longer pinned across the session.
+  const [events, setEvents] = useState([]);
   const [agentRunning, setAgentRunning] = useState(false);
   const [wsStatus, setWsStatus] = useState("connecting");
   // Initial tab: ?tab=<key> in the URL wins so hidden tabs (e.g. ?tab=security)
@@ -3908,7 +3910,8 @@ export default function App() {
         // Clear the reasoning log too, but keep the pre-seeded Act 3 ALERT
         // so the "earlier today" security event survives the reset for
         // the demo narrative ("ORCA was watching the whole time").
-        setEvents([PRE_SEEDED_ALERT]);
+        // Empty the reasoning log on reset — no Act 3 teaser pinning.
+        setEvents([]);
       }
       setTimeout(async () => { try { const sr = await fetch(`${API}/api/state`); setState(await sr.json()); } catch {} }, 400);
     } catch {}
