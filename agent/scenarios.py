@@ -123,40 +123,55 @@ SCENARIOS = {
         ],
         "agent_context": (
             "A warning alarm reports slice-A p99 N3 latency climbing on UPF-01 "
-            "(currently 14.0 ms; SLA 15 ms). Determine whether the cause is "
-            "local to the Nokia core or upstream in the transport.\n\n"
-            "STEP 1 — clear local Nokia-side hypotheses first:\n"
-            "  - get_qer_state(upf='UPF-01') — QER drifted? enforced != intent?\n"
-            "  - get_slice_metrics(upf='UPF-01') — confirm p99 climb localised\n\n"
-            "STEP 2 — only if local state is healthy, expand to transport:\n"
-            "  - get_link_utilization() — any link near capacity on LSP-1 path?\n"
-            "  - get_link_flags() — microbursts on the suspect link?\n\n"
-            "POLITICAL CONTEXT — Nokia is the operator running this agent. "
-            "Nokia owns UPF/SMF/AMF/slice/QER/PFCP. The MPLS transport (LSP "
-            "paths, IGP metrics, link capacity) belongs to a separate transport "
-            "operator. The harness has pre-emptively withheld the LSP/IGP/PR "
-            "tools — you literally do not have access to reroute_lsp, "
-            "set_link_metric, propose_config_change, or open_pull_request. "
-            "Do not waste a turn trying to call them.\n\n"
-            "What you CAN and SHOULD do if the fault is transport-side:\n"
-            "  - open_tac_case(vendor='juniper', node='PE-01', "
-            "fault_type='link_congestion', severity='P1', issue=<evidence>, "
-            "resolution_path=<your suggested fix, e.g. 'Increase IGP metric on "
-            "PE-01-P-02 from 10 to 20 to shift traffic to the alternate path'>). "
-            "The transport team reads, decides, and deploys on their domain.\n"
-            "  - notify_ops_team(severity='major', subject=..., issue=..., "
-            "resolution_path='Transport-side fault — escalated to Juniper TAC. "
-            "No Nokia-side config change appropriate.'). DO NOT claim a PR was "
-            "opened or that any change was deployed.\n"
-            "  - write_episode and assess_sla_risk to close the cycle. "
-            "(write_episode IS allowed for this scenario since there is no "
-            "downstream approval flow — the episode IS the final audit record.)"
+            "(currently 14.0 ms; SLA 15 ms). Find the cause and escalate. "
+            "Follow this exact short sequence — do not loop:\n\n"
+            "STEP 1 — clear UPF as the cause:\n"
+            "  - get_qer_state(upf='UPF-01')\n"
+            "  - get_slice_metrics(upf='UPF-01')\n"
+            "If QER is healthy and slice metrics confirm the latency rise but "
+            "show no local mis-configuration → Nokia core is innocent.\n\n"
+            "STEP 2 — find the transport cause:\n"
+            "  - get_link_utilization()\n"
+            "  - get_link_flags()\n"
+            "Identify the specific link near capacity (PE-01-P-02 is the "
+            "expected culprit) and confirm microbursts.\n\n"
+            "STEP 3 — escalate. Call exactly ONE email tool:\n"
+            "  open_tac_case(\n"
+            "    vendor='juniper', node='PE-01',\n"
+            "    fault_type='link_congestion', severity='P1',\n"
+            "    issue=<one paragraph: alarm details, UPF cleared, transport\n"
+            "           link X at Y% with microbursts, Nokia core not at fault>,\n"
+            "    resolution_path=<one paragraph addressed to BOTH the Juniper\n"
+            "                     transport team AND the internal Nokia NOC.\n"
+            "                     Suggest a transport-side fix the Juniper team\n"
+            "                     can deploy (e.g. 'Increase IGP metric on\n"
+            "                     PE-01-P-02 from 10 to 20 to shift traffic\n"
+            "                     onto the alternate path'). Note that Nokia\n"
+            "                     has no action — this is informational for\n"
+            "                     the NOC and an action request for the\n"
+            "                     vendor.>)\n"
+            "This single TAC email is the only email this cycle should send. "
+            "Do NOT call any other email tool.\n\n"
+            "STEP 4 — record and close:\n"
+            "  - write_episode(...)  — the audit record for this incident\n"
+            "  - assess_sla_risk()   — refresh customer churn risk\n"
+            "Then stop.\n\n"
+            "AUTHORITY — the harness has withheld these tools; do not waste a "
+            "turn trying to call them: reroute_lsp, set_link_metric, "
+            "propose_config_change, open_pull_request, notify_ops_team. "
+            "There is NO Nokia-side config change for this fault."
         ),
-        # Authority gate: no LSP/IGP/proposal action (transport not ours).
-        # Also no PR (there is no Nokia-side change to commit). Episode
-        # IS allowed — this scenario has no downstream stream_approval, so
-        # the agent's write_episode is the audit record for the escalation.
-        "restricted_tools": ["reroute_lsp", "set_link_metric", "propose_config_change", "open_pull_request"],
+        # Authority gate: no LSP/IGP/proposal/PR action (transport not ours).
+        # ALSO no notify_ops_team — for Act 2 we want exactly ONE email,
+        # the TAC case to Juniper, which covers both the vendor (their
+        # action requested) and the internal NOC (Nokia innocent FYI) in
+        # the same body. notify_ops_team would be a redundant second copy.
+        # write_episode IS allowed — it is the audit record for this cycle
+        # since there is no downstream stream_approval.
+        "restricted_tools": [
+            "reroute_lsp", "set_link_metric", "propose_config_change",
+            "open_pull_request", "notify_ops_team",
+        ],
     },
 }
 
