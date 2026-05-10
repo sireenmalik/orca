@@ -1983,7 +1983,7 @@ function V2EmailModal({ email, onClose, onSend, onDiscard, onEdit, onSaveDraft }
               lineHeight: 1.65, whiteSpace: "pre-wrap", wordBreak: "break-word",
               fontFamily: "'DM Sans', 'Segoe UI', system-ui, sans-serif",
             }}>
-              {email.body || ""}
+              <Linkify text={email.body || ""} />
             </div>
           )}
         </div>
@@ -3096,6 +3096,36 @@ function fmtCount(n) {
   const v = Number(n) || 0;
   if (v >= 1_000) return v.toLocaleString();
   return `${v}`;
+}
+
+// ─── Linkify ──────────────────────────────────────────────────────────────────
+// Render plain-text strings (notably email bodies) with embedded http(s) URLs
+// converted to clickable <a> tags. Returns a React fragment so the caller can
+// drop it inside any text container that already handles whitespace pre-wrap.
+const _URL_RE = /(https?:\/\/[^\s<>)\]]+)/g;
+function Linkify({ text }) {
+  if (!text) return null;
+  const out = [];
+  let lastIdx = 0, key = 0, m;
+  // reset since the regex is module-scoped (stateful with /g)
+  _URL_RE.lastIndex = 0;
+  while ((m = _URL_RE.exec(text)) !== null) {
+    if (m.index > lastIdx) out.push(text.slice(lastIdx, m.index));
+    // Strip trailing punctuation that's almost never part of the URL
+    let url = m[0];
+    while (/[.,;:!?'\"]$/.test(url)) url = url.slice(0, -1);
+    out.push(
+      <a key={key++} href={url} target="_blank" rel="noopener noreferrer"
+         onClick={e => e.stopPropagation()}
+         style={{ color: C.blue, textDecoration: "underline", wordBreak: "break-all" }}>
+        {url}
+      </a>
+    );
+    if (url.length < m[0].length) out.push(m[0].slice(url.length));
+    lastIdx = m.index + m[0].length;
+  }
+  if (lastIdx < text.length) out.push(text.slice(lastIdx));
+  return <>{out}</>;
 }
 
 // ─── Customer portfolio rollup (single source of truth) ─────────────────────
