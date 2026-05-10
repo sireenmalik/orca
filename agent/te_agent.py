@@ -678,23 +678,42 @@ class ORCAAgent:
              "input_schema": {"type": "object", "properties": {
                  "link_id": {"type": "string"}, "metric": {"type": "integer"}},
                  "required": ["link_id", "metric"]}},
-            {"name": "notify_ops_team", "description": "Send email notification to ops team. MANDATORY after every action.",
+            {"name": "notify_ops_team",
+             "description": (
+                 "Send a structured email notification to the NOC. MANDATORY after the analysis cycle. "
+                 "Provide ``issue`` and ``resolution_path`` as separate paragraphs — the runtime renders "
+                 "the email body from these. The output format is a fixed two-section template followed "
+                 "by a timestamp signature; do NOT pre-format the body yourself.\n\n"
+                 "CRITICAL — the resolution_path text must NOT claim that a PR was opened, that a config "
+                 "was committed, or that any git/NETCONF action has been performed. Those happen AFTER "
+                 "the human approves the proposal in the dashboard. Phrase the resolution as 'proposal "
+                 "<id> ready for review in the dashboard; ops team to approve' instead."
+             ),
              "input_schema": {"type": "object", "properties": {
-                 "subject": {"type": "string"},
-                 "message": {"type": "string"},
-                 "severity": {"type": "string", "enum": ["critical","major","minor","info"]}},
-                 "required": ["subject", "message", "severity"]}},
-            {"name": "open_tac_case", "description": "Open vendor TAC support case for hardware faults.",
+                 "subject": {"type": "string", "description": "Short headline — customer/slice/incident."},
+                 "issue": {"type": "string", "description": "What was detected — alarm, diagnosis, affected service, SLA implication. One concise paragraph."},
+                 "resolution_path": {"type": "string", "description": "What was proposed and what the operator should do next. Reference the proposal id (e.g. 'cfg-XXXXX'). Steps: review and approve in the dashboard. DO NOT claim git/PR/NETCONF actions have happened — those follow approval."},
+                 "severity": {"type": "string", "enum": ["critical","major","minor","info"]},
+                 "proposal_id": {"type": "string", "description": "Optional. The cfg-XXX id from this cycle's propose_config_change for cross-reference."}},
+                 "required": ["subject", "issue", "resolution_path", "severity"]}},
+            {"name": "open_tac_case",
+             "description": (
+                 "Open a vendor TAC support case via email. Provide ``issue`` and ``resolution_path`` "
+                 "as separate paragraphs — the runtime renders the body. Use this for hardware faults "
+                 "(vendor='nokia') OR upstream-domain faults the operator can't fix and the vendor "
+                 "should investigate (vendor='juniper'/'cisco' for transport-side issues)."
+             ),
              "input_schema": {"type": "object", "properties": {
                  "vendor": {"type": "string", "enum": ["nokia","juniper","cisco"]},
-                 "node": {"type": "string"}, "interface": {"type": "string"},
+                 "node": {"type": "string"},
+                 "interface": {"type": "string"},
                  "fault_type": {"type": "string"},
                  "severity": {"type": "string", "enum": ["P1","P2","P3","P4"]},
-                 "description": {"type": "string"},
+                 "issue": {"type": "string", "description": "What was detected; evidence; affected service. Concise paragraph."},
+                 "resolution_path": {"type": "string", "description": "Suggested fix for the vendor's domain (e.g. 'increase IGP metric on PE-01-P-02 from 10 to 20'). Phrase as a recommendation, not a directive."},
                  "affected_lsps": {"type": "string"},
-                 "actions_taken": {"type": "string"},
                  "suspected_cause": {"type": "string"}},
-                 "required": ["vendor", "node", "fault_type", "severity", "description"]}},
+                 "required": ["vendor", "node", "fault_type", "severity", "issue", "resolution_path"]}},
             {"name": "write_episode",
              "description": "Write a learning episode to skills/past/episodes/ after an action cycle completes. Records what happened, what was done, outcome, and any learned constraints. Always call this at the end of a successful or failed action cycle.",
              "input_schema": {"type": "object", "properties": {
@@ -788,28 +807,61 @@ class ORCAAgent:
                 result = await self.adapter.set_link_metric(inputs["link_id"], inputs["metric"])
             elif name == "notify_ops_team":
                 to = os.getenv("OPS_EMAIL", "sireenmalik@gmail.com")
-                emoji = {"critical":"🔴","major":"🟠","minor":"🟡","info":"🟢"}.get(inputs.get("severity","info"),"📡")
-                subject = f"{emoji} ORCA [{inputs.get('severity','info').upper()}]: {inputs['subject']}"
-                body = self._append_artifacts_footer(inputs["message"])
+                sev = (inputs.get("severity") or "info").lower()
+                emoji = {"critical":"🔴","major":"🟠","minor":"🟡","info":"🟢"}.get(sev, "📡")
+                subject = f"{emoji} ORCA [{sev.upper()}]: {inputs.get('subject','ORCA notification')}"
+
+                # Structured body — runtime composes from issue + resolution_path
+                # so the LLM doesn't drift on format and can't accidentally
+                # claim a PR was opened pre-approval.
+                issue = (inputs.get("issue") or "").strip()
+                resolution = (inputs.get("resolution_path") or "").strip()
+                pid = (inputs.get("proposal_id") or "").strip()
+                # Backward compat: accept legacy "message" if model uses it.
+                if not issue and not resolution and inputs.get("message"):
+                    issue = str(inputs["message"]).strip()
+
+                ts = datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
+                parts = []
+                if issue:
+                    parts.append(f"1. Issue [{sev.upper()}]: {issue}")
+                if resolution:
+                    parts.append(f"2. Resolution Path: {resolution}")
+                if pid:
+                    parts.append(f"Proposal ID: {pid}")
+                parts.append(f"{ts} | by ORCA")
+                body = "\n\n".join(parts)
+                body = self._append_artifacts_footer(body)
                 result = send_email(to=to, subject=subject, body=body)
             elif name == "open_tac_case":
                 to = os.getenv("OPS_EMAIL", "sireenmalik@gmail.com")
-                vendor = inputs.get("vendor", "nokia")  # Nokia by default
-                fault_data = {
-                    "node": inputs.get("node","Unknown"),
-                    "interface": inputs.get("interface","Unknown"),
-                    "fault_type": inputs.get("fault_type","Unknown"),
-                    "priority": inputs.get("severity","P2"),
-                    "severity": inputs.get("severity","P2"),
-                    "description": inputs.get("description",""),
-                    "affected_lsps": inputs.get("affected_lsps","None"),
-                    "actions_taken": inputs.get("actions_taken","None"),
-                    "suspected_cause": inputs.get("suspected_cause","Under investigation"),
-                    "location": "DC-SFO2 / Rack A3",
-                }
-                body = build_tac_email(vendor, fault_data)
+                vendor = inputs.get("vendor", "nokia")
+                sev = (inputs.get("severity") or "P2").upper()
+                node = inputs.get("node", "Unknown")
+                fault_type = inputs.get("fault_type", "Unknown")
+                # Structured body — same Issue / Resolution Path template the
+                # NOC notify uses, plus a vendor header and TAC metadata block.
+                issue = (inputs.get("issue") or inputs.get("description") or "").strip()
+                resolution = (inputs.get("resolution_path") or "").strip()
+                affected_lsps = inputs.get("affected_lsps") or "None"
+                suspected = inputs.get("suspected_cause") or "Under investigation"
+                ts = datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
+                vendor_label = vendor.upper()
+                header = (
+                    f"{vendor_label} NETWORKS — AUTOMATED SUPPORT REQUEST\n"
+                    f"{'=' * 51}\n"
+                    f"Priority: {sev}  |  Node: {node}  |  Fault: {fault_type}\n"
+                    f"Affected LSPs: {affected_lsps}  |  Suspected: {suspected}\n"
+                )
+                parts = [header]
+                if issue:
+                    parts.append(f"1. Issue [{sev}]: {issue}")
+                if resolution:
+                    parts.append(f"2. Resolution Path: {resolution}")
+                parts.append(f"{ts} | by ORCA")
+                body = "\n\n".join(parts)
                 body = self._append_artifacts_footer(body)
-                subject = f"[TAC {inputs.get('severity','P2')}] {vendor.upper()} — {inputs.get('fault_type','Fault')} on {inputs.get('node','Unknown')}"
+                subject = f"[TAC {sev}] {vendor_label} — {fault_type} on {node}"
                 result = send_email(to=to, subject=subject, body=body)
             elif name == "detect_config_drift":
                 node = inputs.get("node", "PE-01")

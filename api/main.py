@@ -848,41 +848,47 @@ async def approve_proposal(proposal_id: str, body: ProposalAction = ProposalActi
             episode_url = f"https://github.com/sireenmalik/orca/tree/main/skills/past/episodes/{ep_month}/"
             episode_id  = ""
 
-        # ── 5. Send NOC email with PR + episode links ──
+        # ── 5. Send NOC email with PR + episode links — same Issue/Resolution
+        # template the agent uses, plus a validation-tests block and the
+        # post-deployment status. Both URLs are clickable.
         ops_email = os.getenv("OPS_EMAIL", "sireenmalik@gmail.com")
-        check_summary = "\n".join(
-            f"  {'✅' if v else '❌'} {k}: {validation_detail.get(k,'')}"
+        ts_str = datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
+        validation_lines = "\n".join(
+            f"  {'✅' if v else '❌'} {k.replace('_', ' ').title():14}— {validation_detail.get(k,'')}"
             for k, v in validation.items()
         )
-        email_body = f"""ORCA Config Management Report
-==============================
+        change_lines = "\n".join(
+            f"  • {ch.get('device', ch.get('node', '?'))}: {ch.get('diff_summary', ch.get('type','change'))}"
+            for ch in changes
+        ) or "  (see PR diff)"
 
-Incident: {trigger_desc}
-Routers affected: {routers_str}
-Proposed improvement: {proposal.get('projected_improvement', 'see episode')}
+        issue_text = trigger_desc or "see proposal reason"
+        resolution_text = (
+            f"Operator approved proposal {proposal.get('id','?')}. "
+            f"Config committed to branch {branch} (commit {commit_sha[:8] if commit_sha else '—'}) "
+            f"and deployed via NETCONF to {routers_str}. "
+            f"{proposal.get('projected_improvement', 'See episode for projected outcome.')}"
+        )
+        post_status = (
+            f"Config committed and deployed. {len(changes)} change(s) applied across "
+            f"{routers_str}. Deployment validated via the digital twin against all "
+            f"six gates (see below)."
+        )
 
-VALIDATION CHECKS
------------------
-{check_summary}
-
-CONFIG CHANGES PUSHED
----------------------
-Branch: {branch}
-Commit: {commit_sha or 'see PR'}
-"""
-        for ch in changes:
-            router = ch.get("device", ch.get("node", ch.get("router", "?")))
-            email_body += f"\n{router}: {ch.get('diff_summary', ch.get('type','change'))}"
-
-        email_body += f"""
-
-LINKS
------
-GitHub PR #{pr_number}: {pr_url or 'see GitHub'}
-Episode: {episode_url}
-
-Actions taken:
-""" + "\n".join(f"  - {a}" for a in actions_taken)
+        email_body = (
+            f"1. Issue: {issue_text}\n\n"
+            f"2. Resolution Proposed: {resolution_text}\n\n"
+            f"3. Validation Tests (digital twin):\n{validation_lines}\n\n"
+            f"4. Status After Deployment: {post_status}\n\n"
+            f"Config Changes:\n{change_lines}\n\n"
+            f"─── LINKS ────────────────────────────────────────\n"
+            f"Config PR:   {pr_url or '(see GitHub)'}\n"
+            f"Episode:     {episode_url}\n"
+            f"Branch:      {branch}\n"
+            f"Commit:      {commit_sha or '(see PR)'}\n"
+            f"──────────────────────────────────────────────────\n\n"
+            f"{ts_str} | by ORCA"
+        )
 
         from agent.notifications import send_email
         send_email(

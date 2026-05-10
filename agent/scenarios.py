@@ -51,6 +51,10 @@ SCENARIOS = {
         # cust-A (Helix Robotics) rides slice-A; the QER drift hits them
         # specifically. Other LSP-1 tenants are unaffected by this fault.
         "impacted_customers": ["cust-A"],
+        # Pre-approval restrictions: the agent must NOT open PRs or write
+        # episodes mid-cycle. Those happen in stream_approval AFTER the
+        # human approves the proposal in the dashboard.
+        "restricted_tools": ["open_pull_request", "write_episode"],
         "state_changes": [
             # QER drift: enforced rate sits 36% below committed GBR.
             {"target": "qer_state.UPF-01.slice-A", "op": "set",
@@ -69,12 +73,21 @@ SCENARIOS = {
         "agent_context": (
             "An info-level alarm on UPF-01 reports that the slice-A p99 N3 latency "
             "trend slope projects an SLA breach within ~4 minutes. SLA is 15 ms; "
-            "current p99 is 13.0 ms. No transport alarm is present. Investigate the "
-            "root cause across UPF-local state (QER enforcement, slice metrics) and "
-            "transport telemetry (link utilization, link flags), decide whether the "
-            "fault is local to UPF or upstream, and act per the standard ORCA cycle "
-            "including notify_ops_team, propose_config_change, open_pull_request, "
-            "write_episode, and assess_sla_risk."
+            "current p99 is 13.0 ms. No transport alarm is present.\n\n"
+            "Investigate the root cause across UPF-local state (get_qer_state, "
+            "get_slice_metrics) and transport telemetry (get_link_utilization, "
+            "get_link_flags) to decide whether the fault is local to UPF or upstream.\n\n"
+            "Once you've concluded, call propose_config_change to create the "
+            "remediation proposal in the dashboard for the operator to review. "
+            "Then call notify_ops_team and open_tac_case (vendor='nokia', P3) "
+            "with structured issue + resolution_path fields so the runtime can "
+            "format the emails. End the cycle with assess_sla_risk.\n\n"
+            "DO NOT call open_pull_request or write_episode — those tools are "
+            "intentionally not available to you in this cycle. The dashboard's "
+            "approval workflow opens the PR and writes the episode AFTER the "
+            "human approves your proposal. In your resolution_path text, phrase "
+            "next steps as 'proposal cfg-XXX is ready for review in the dashboard' "
+            "— do NOT claim a PR has been opened or a config has been deployed."
         ),
     },
 
@@ -121,24 +134,29 @@ SCENARIOS = {
             "POLITICAL CONTEXT — Nokia is the operator running this agent. "
             "Nokia owns UPF/SMF/AMF/slice/QER/PFCP. The MPLS transport (LSP "
             "paths, IGP metrics, link capacity) belongs to a separate transport "
-            "operator. For this incident the harness has pre-emptively withheld "
-            "the LSP/IGP/proposal tools — you literally do not have access to "
-            "reroute_lsp, set_link_metric, or propose_config_change. Do not "
-            "waste a turn trying to call them.\n\n"
+            "operator. The harness has pre-emptively withheld the LSP/IGP/PR "
+            "tools — you literally do not have access to reroute_lsp, "
+            "set_link_metric, propose_config_change, or open_pull_request. "
+            "Do not waste a turn trying to call them.\n\n"
             "What you CAN and SHOULD do if the fault is transport-side:\n"
-            "  - open_tac_case(vendor='juniper', node=<their PE>, "
-            "fault_type='link_congestion', severity='P1', description=<full "
-            "evidence + your suggested fix, e.g. 'increase IGP metric on "
-            "PE-01-P-02 from 10 to 20'>) — your proposed remedy goes in the "
-            "description body. The transport team reads it, decides, and "
-            "deploys on their domain.\n"
-            "  - notify_ops_team(severity='major', subject=..., message=...) — "
-            "tell the Nokia NOC what we observed, that we have escalated to "
-            "the transport vendor, and that no Nokia-side config change is "
-            "appropriate.\n"
-            "  - write_episode and assess_sla_risk to close the cycle."
+            "  - open_tac_case(vendor='juniper', node='PE-01', "
+            "fault_type='link_congestion', severity='P1', issue=<evidence>, "
+            "resolution_path=<your suggested fix, e.g. 'Increase IGP metric on "
+            "PE-01-P-02 from 10 to 20 to shift traffic to the alternate path'>). "
+            "The transport team reads, decides, and deploys on their domain.\n"
+            "  - notify_ops_team(severity='major', subject=..., issue=..., "
+            "resolution_path='Transport-side fault — escalated to Juniper TAC. "
+            "No Nokia-side config change appropriate.'). DO NOT claim a PR was "
+            "opened or that any change was deployed.\n"
+            "  - write_episode and assess_sla_risk to close the cycle. "
+            "(write_episode IS allowed for this scenario since there is no "
+            "downstream approval flow — the episode IS the final audit record.)"
         ),
-        "restricted_tools": ["reroute_lsp", "set_link_metric", "propose_config_change"],
+        # Authority gate: no LSP/IGP/proposal action (transport not ours).
+        # Also no PR (there is no Nokia-side change to commit). Episode
+        # IS allowed — this scenario has no downstream stream_approval, so
+        # the agent's write_episode is the audit record for the escalation.
+        "restricted_tools": ["reroute_lsp", "set_link_metric", "propose_config_change", "open_pull_request"],
     },
 }
 
