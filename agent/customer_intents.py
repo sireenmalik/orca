@@ -59,11 +59,24 @@ INTENTS_DIR = Path(__file__).resolve().parent.parent / "intents" / "customers"
 #   POST /api/scenarios/.../inject  -> set_impacted(scenario.impacted_customers)
 #   stream_approval finishes        -> clear_impacted()  (save → baseline)
 
-# Customers whose YAML fixture value is the UNDER-FAULT state — these get
-# the baseline override applied when they are NOT in _IMPACTED. Anyone not
-# in this set is assumed to have a fixture value that represents their
-# steady-state (e.g. cust-D's at-risk story is non-transport, persists).
-_DYNAMIC_CUSTOMERS = {"cust-A", "cust-B", "cust-C"}
+# Customers whose YAML fixture value is the UNDER-FAULT state — these
+# all get the baseline override applied when they are NOT in _IMPACTED.
+# Empty _IMPACTED at startup / after reset → portfolio is fully green;
+# only customers explicitly listed in scenario.impacted_customers flip
+# to their fixture (under-fault) values.
+#
+# cust-H..L are NOT in this set because their YAML fixture is already
+# the healthy steady-state (NPS Δ=0, no P1, no escalation). They never
+# need an override.
+#
+# cust-D's story (lingering P1 + billing dispute + competitor) is held
+# in the fixture for use by a future "post-incident escalation" demo
+# scenario; it is overridden to baseline when not explicitly impacted
+# so the standard fault → save arc reads as fully green at rest.
+_DYNAMIC_CUSTOMERS = {
+    "cust-A", "cust-B", "cust-C",
+    "cust-D", "cust-E", "cust-F", "cust-G",
+}
 
 _IMPACTED: set = set()
 
