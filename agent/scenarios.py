@@ -316,21 +316,45 @@ async def _cancel_current(broadcast, reason: str) -> None:
 async def inject(scenario_id: str, broadcast, adapter, reset_baseline, agent) -> dict:
     """Apply scenario fault state and trigger one agent.analyze() cycle.
 
-    If a scenario is already running, cancel it, reset the adapter, then
-    begin the new one. ``reset_baseline`` is a 0-arg callable that
-    re-instantiates the adapter; ``agent`` is the live ORCAAgent.
+    Every inject starts from a CLEAN baseline — any residual state from
+    the previous scenario (alarms, link util, QER drift, customer impact,
+    cycle artifacts, dedup signature) is wiped before the new fault is
+    applied. We don't simulate two compound faults at once today.
+    ``reset_baseline`` is a 0-arg callable that re-instantiates the
+    adapter; ``agent`` is the live ORCAAgent.
     """
     global _current_task, _current_id
     scenario = SCENARIOS.get(scenario_id)
     if not scenario:
         return {"error": f"unknown scenario: {scenario_id}"}
 
+    # 1. Cancel any in-flight cycle first.
     if _current_task and not _current_task.done():
         await _cancel_current(broadcast, reason="interrupted by new injection")
-        reset_baseline()
+
+    # 2. ALWAYS reset baseline before applying new fault state. This is
+    #    independent of whether a task was running — if Act 2 completed
+    #    earlier and left transport congestion in the adapter, injecting
+    #    Act 1 next must NOT see that residual state.
+    reset_baseline()
+    customer_intents.clear_impacted()
+    if hasattr(agent, "reset_fault_signature"):
+        agent.reset_fault_signature()
+    # Tell the dashboard the portfolio just went green.
+    await broadcast({
+        "type":      "customer_state_changed",
+        "timestamp": datetime.utcnow().isoformat(),
+        "data":      {"impacted": [], "reason": "scenario_inject_reset"},
+    })
+
+    # 3. reset_baseline() rebinds the api module's global adapter AND
+    #    agent.adapter to a fresh instance. The ``adapter`` argument we
+    #    captured at call time is now stale — pull the live adapter from
+    #    agent.adapter for the play.
+    live_adapter = getattr(agent, "adapter", adapter) if agent else adapter
 
     _current_id   = scenario_id
-    _current_task = asyncio.create_task(_play(scenario, broadcast, adapter, agent))
+    _current_task = asyncio.create_task(_play(scenario, broadcast, live_adapter, agent))
     return {
         "status":           "playing",
         "id":               scenario_id,
