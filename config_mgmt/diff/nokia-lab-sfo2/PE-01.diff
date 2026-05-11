@@ -1,0 +1,11 @@
+# ORCA Config Proposal — PE-01
+# Generated: 2026-05-11T03:49:51.086335Z
+# Incident: QER state shows slice-A intent GBR 50 Mbps but enforced only 32 Mbps, causing increased latency and projected SLA breach.
+# Branch: cfg/PE-01-20260511-034950
+
+configure router isis 0
+    interface "unknown"
+-       metric ?
++       metric ?
+    exit
+exit
