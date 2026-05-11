@@ -51,10 +51,17 @@ SCENARIOS = {
         # cust-A (Helix Robotics) rides slice-A; the QER drift hits them
         # specifically. Other LSP-1 tenants are unaffected by this fault.
         "impacted_customers": ["cust-A"],
-        # Pre-approval restrictions: the agent must NOT open PRs or write
-        # episodes mid-cycle. Those happen in stream_approval AFTER the
-        # human approves the proposal in the dashboard.
-        "restricted_tools": ["open_pull_request", "write_episode"],
+        # Pre-approval restrictions:
+        #  - open_pull_request, write_episode → done by stream_approval
+        #    AFTER human approval, not mid-cycle by the agent.
+        #  - notify_ops_team, open_tac_case → fired INLINE by the
+        #    propose_config_change handler the moment the proposal is
+        #    created, so the NOC + TAC emails land simultaneously with
+        #    the proposal in the dashboard (no 20-30s sequential-iter gap).
+        "restricted_tools": [
+            "open_pull_request", "write_episode",
+            "notify_ops_team", "open_tac_case",
+        ],
         "state_changes": [
             # QER drift: enforced rate sits 36% below committed GBR.
             {"target": "qer_state.UPF-01.slice-A", "op": "set",
@@ -74,20 +81,34 @@ SCENARIOS = {
             "An info-level alarm on UPF-01 reports that the slice-A p99 N3 latency "
             "trend slope projects an SLA breach within ~10 minutes. SLA is 15 ms; "
             "current p99 is 13.0 ms. No transport alarm is present.\n\n"
-            "Investigate the root cause across UPF-local state (get_qer_state, "
-            "get_slice_metrics) and transport telemetry (get_link_utilization, "
-            "get_link_flags) to decide whether the fault is local to UPF or upstream.\n\n"
-            "Once you've concluded, call propose_config_change to create the "
-            "remediation proposal in the dashboard for the operator to review. "
-            "Then call notify_ops_team and open_tac_case (vendor='nokia', P3) "
-            "with structured issue + resolution_path fields so the runtime can "
-            "format the emails. End the cycle with assess_sla_risk.\n\n"
-            "DO NOT call open_pull_request or write_episode — those tools are "
-            "intentionally not available to you in this cycle. The dashboard's "
-            "approval workflow opens the PR and writes the episode AFTER the "
-            "human approves your proposal. In your resolution_path text, phrase "
-            "next steps as 'proposal cfg-XXX is ready for review in the dashboard' "
-            "— do NOT claim a PR has been opened or a config has been deployed."
+            "Follow this tight 3-step procedure — do not loop:\n\n"
+            "STEP 1 — investigate. Call get_qer_state(upf='UPF-01'), "
+            "get_slice_metrics(upf='UPF-01'), get_link_utilization(), and "
+            "get_link_flags() to confirm the fault is local to UPF (QER drift) "
+            "rather than transport.\n\n"
+            "STEP 2 — propose. Call propose_config_change with:\n"
+            "  - title:  one-line summary (e.g. 'Restore slice-A QER GBR on UPF-01')\n"
+            "  - reason: one paragraph naming the alarm, the QER drift values\n"
+            "            (enforced vs intent), and the projected impact\n"
+            "  - changes: a list with at least one entry naming device='UPF-01'\n"
+            "             with type='qer_change' and diff_summary describing the\n"
+            "             enforced_mbps restoration\n"
+            "  - validation_results: a 6-key object covering syntax, semantic,\n"
+            "             mission_1, mission_2, digital_twin, policy\n"
+            "  - projected_improvement: one short clause (e.g. 'p99 N3 latency\n"
+            "             projected to drop to ~9 ms')\n"
+            "The handler automatically queues the NOC + TAC P3 emails IN THE "
+            "SAME ITERATION, so the operator sees the proposal AND the two "
+            "emails appear together — no need to call notify_ops_team or "
+            "open_tac_case yourself.\n\n"
+            "STEP 3 — close. Call assess_sla_risk() once. Then stop.\n\n"
+            "WITHHELD TOOLS — these have been removed from your schema for "
+            "this cycle; do not waste a turn trying to call them:\n"
+            "  - notify_ops_team   (fired automatically by propose_config_change)\n"
+            "  - open_tac_case     (fired automatically by propose_config_change)\n"
+            "  - open_pull_request (happens AFTER human approval in the dashboard)\n"
+            "  - write_episode     (happens AFTER human approval in the dashboard)\n"
+            "  - reroute_lsp / set_link_metric (not the right fix for QER drift)"
         ),
     },
 

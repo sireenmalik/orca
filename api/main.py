@@ -196,11 +196,15 @@ async def list_scenarios():
 
 @app.post("/api/scenarios/{scenario_id}/inject")
 async def inject_scenario(scenario_id: str):
-    # Each inject uses the CURRENT module-level adapter — ``_reset_to_baseline``
-    # rebinds it via ``global adapter``. We read adapter on entry so
-    # concurrent injects see a consistent reference. Agent reference is
-    # threaded in so scenarios.inject() can drive a real ``agent.analyze()``
-    # cycle instead of scripted playback.
+    # Every scenario inject starts FULLY clean — same wipe as ↻ Reset Demo:
+    # all proposals (v2 + agent), all emails, all alarms, all security
+    # alerts, all churn state, all cycle artifact pointers, customer
+    # impact flags, agent dedup signature. Each Act runs entirely
+    # independent of the previous one. No compound-fault simulation today.
+    await reset_network()
+    # After reset_network the module-level ``adapter`` global has been
+    # rebound to a fresh instance. Read it now (post-reset) so we hand
+    # the live one to v2_scenarios.inject.
     return await v2_scenarios.inject(
         scenario_id,
         broadcast=manager.broadcast,
