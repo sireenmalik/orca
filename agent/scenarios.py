@@ -173,14 +173,15 @@ SCENARIOS = {
             "                     has no action — this is informational for\n"
             "                     the NOC and an action request for the\n"
             "                     vendor.>)\n"
-            "This single TAC email is the only email this cycle should send.\n\n"
-            "TURN 3 — record and close, BOTH in parallel in the same turn:\n"
-            "  • write_episode(...)  — audit record\n"
-            "  • assess_sla_risk()   — refresh churn risk\n"
-            "Then stop.\n\n"
+            "This single TAC email is the only email this cycle should send. "
+            "After the email is queued, STOP — return a final message with no "
+            "further tool calls. Do not call write_episode, assess_sla_risk, "
+            "or any other tool; the cycle is complete once the TAC case is "
+            "opened.\n\n"
             "AUTHORITY — the harness has withheld these tools; do not waste a "
             "turn trying to call them: reroute_lsp, set_link_metric, "
-            "propose_config_change, open_pull_request, notify_ops_team. "
+            "propose_config_change, open_pull_request, notify_ops_team, "
+            "write_episode, assess_sla_risk. "
             "There is NO Nokia-side config change for this fault."
         ),
         # Authority gate: no LSP/IGP/proposal/PR action (transport not ours).
@@ -188,11 +189,14 @@ SCENARIOS = {
         # the TAC case to Juniper, which covers both the vendor (their
         # action requested) and the internal NOC (Nokia innocent FYI) in
         # the same body. notify_ops_team would be a redundant second copy.
-        # write_episode IS allowed — it is the audit record for this cycle
-        # since there is no downstream stream_approval.
+        # write_episode + assess_sla_risk are silent (not displayed in the
+        # demo) and were costing one LLM turn (~30s) each cycle for nothing
+        # the user can see; restricted out so the cycle stops at the TAC
+        # email and finishes in ~2 turns instead of 3.
         "restricted_tools": [
             "reroute_lsp", "set_link_metric", "propose_config_change",
             "open_pull_request", "notify_ops_team",
+            "write_episode", "assess_sla_risk",
         ],
     },
 }
