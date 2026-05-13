@@ -26,6 +26,7 @@ faithful to a real Nokia-lab deployment.
 from __future__ import annotations
 
 import asyncio
+import os
 from datetime import datetime
 from typing import Optional
 
@@ -137,6 +138,20 @@ SCENARIOS = {
         # _play (no stream_approval to pass through). Outcome value must
         # match the Distiller's action.type enum verbatim.
         "episode_at_end_outcome": "vendor_escalation",
+        # L5 short-circuit signature. If a ratified policy intent in the
+        # PolicyIndex matches this signature, _play skips agent.analyze()
+        # entirely, fires the prescribed action deterministically, and
+        # emits the episode + a visible "Matched policy" reasoning event.
+        # On a cold start (no ratified intent yet), _play falls through
+        # to the LLM path. This is the L5 demo punchline: same scenario
+        # injects, first run goes through Nemotron (~36s), second run
+        # short-circuits (<1s).
+        "match_signature": {
+            "transport_link_util_pct":  93,
+            "upf_qer_status":           "ok",
+            "affected_customer_count":  3,
+            "core_amf_load_pct":        40,
+        },
         # The cross-domain demo moment: three tenants ride LSP-1 — Helix
         # Robotics (5G slice-A), Meridian Capital Markets (MPLS L3VPN),
         # Larkspur Markets (MPLS L3VPN). Same physical congestion event,
@@ -336,12 +351,83 @@ async def _play(scenario: dict, broadcast, adapter, agent) -> None:
                 pass  # don't let one bad patch kill the run
         await _broadcast_state(broadcast, adapter)
 
+        # 2b. L5 SHORT-CIRCUIT — check the ratified PolicyIndex BEFORE
+        # spinning up the LLM. If a prior episode of this fault has
+        # already been distilled, ratified, and matched against this
+        # scenario's match_signature, execute the prescribed action
+        # deterministically and skip agent.analyze() entirely. Wall-
+        # clock drops from ~36s (LLM diagnosis path) to <1s. This is
+        # the demo's L5 win.
+        short_circuited = False
+        match_sig = scenario.get("match_signature")
+        if match_sig and agent is not None:
+            try:
+                from agent import policy_index as _pi
+                hit = _pi.match(match_sig, min_confidence=0.75)
+            except Exception as _me:
+                hit = None
+                print(f"[short-circuit] match failed: "
+                      f"{type(_me).__name__}: {_me}", flush=True)
+            if hit:
+                short_circuited = True
+                intent_id = hit.get("intent_id", "")
+                action    = hit.get("action") or {}
+                act_type  = action.get("type", "")
+                conf      = hit.get("confidence", "?")
+                # The visible audience marker — drops the L5 win into
+                # the reasoning log.
+                await broadcast({
+                    "type":      "agent_reasoning",
+                    "timestamp": datetime.utcnow().isoformat(),
+                    "data":      {"text":
+                        f"📚 Matched {intent_id} from prior episode — "
+                        f"executing prescribed action `{act_type}` "
+                        f"directly under guardrail envelope missions-v2. "
+                        f"Reasoning skipped (confidence {conf}). "
+                        f"L5 closed-loop short-circuit."
+                    },
+                })
+                # Execute the prescribed action. For vendor_escalation,
+                # synthesize the same TAC email the LLM path produces.
+                # Pattern matches stream_approval's deterministic email
+                # composition — no LLM, just send.
+                try:
+                    if act_type == "vendor_escalation":
+                        from agent.notifications import send_email
+                        ts = datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
+                        impacted_ids = list(scenario.get("impacted_customers", []))
+                        issue = scenario.get("description", "Transport-side fault")
+                        resolution = (
+                            f"Matched ratified policy intent {intent_id} "
+                            f"(confidence {conf}). Action: open TAC case "
+                            f"with transport vendor — no Nokia config "
+                            f"change. {len(impacted_ids)} customer(s) "
+                            f"impacted via shared underlay; informational "
+                            f"for NOC, action requested from vendor."
+                        )
+                        body = (
+                            f"1. Issue [P1]: {issue}\n\n"
+                            f"2. Resolution Path: {resolution}\n\n"
+                            f"Source Policy: {intent_id}\n"
+                            f"{ts} | by ORCA (L5 short-circuit)"
+                        )
+                        ops_email = os.getenv("OPS_EMAIL", "sireenmalik@gmail.com")
+                        send_email(
+                            to=ops_email,
+                            subject=f"[TAC P1] JUNIPER — link_congestion on PE-01",
+                            body=body,
+                        )
+                except Exception as _ae:
+                    print(f"[short-circuit] action exec failed: "
+                          f"{type(_ae).__name__}: {_ae}", flush=True)
+
         # 3. Hand control to the agent. The agent's emitted events
         # (agent_thinking, agent_reasoning, tool_call, tool_result,
         # tool_error, security_alert, pr_opened, churn_risk_update,
         # agent_status) flow to the websocket bus via on_agent_event,
-        # so the dashboard's reasoning log fills in real time.
-        if agent is not None:
+        # so the dashboard's reasoning log fills in real time. Skipped
+        # when a ratified policy short-circuit already fired the action.
+        if agent is not None and not short_circuited:
             # Snapshot the active scenario onto the agent so handlers
             # (propose_config_change) and the post-cycle episode emitter
             # can read the canonical scenario.description + impacted
