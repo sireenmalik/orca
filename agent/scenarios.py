@@ -336,7 +336,10 @@ async def _play(scenario: dict, broadcast, adapter, agent) -> None:
                 for cid in impacted_ids:
                     rec = customer_intents.get_by_id(cid) or {}
                     arr_at_risk_usd += int(rec.get("arr_usd", 0) or 0)
-                await agent._execute_tool("write_episode", {
+                print(f"[EP-EMIT] scenario={scenario['id']} outcome={end_outcome} "
+                      f"customers={impacted_ids} arr_at_risk={arr_at_risk_usd}",
+                      flush=True)
+                ep_res = await agent._execute_tool("write_episode", {
                     "scenario_id":             scenario["id"],
                     "diagnosis":               scenario.get("description", ""),
                     "outcome":                 end_outcome,
@@ -357,6 +360,8 @@ async def _play(scenario: dict, broadcast, adapter, agent) -> None:
                     "notifications_sent": ["TAC case opened with transport vendor"],
                     "actions_taken":      ["open_tac_case"],
                 })
+                print(f"[EP-EMIT] write_episode result: {str(ep_res)[:240]}",
+                      flush=True)
             except Exception as e:
                 # Non-critical learning loop. Failure must not break the
                 # demo flow or the user-facing scenario_complete signal.
