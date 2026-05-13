@@ -255,6 +255,34 @@ async def _broadcast_state(broadcast, adapter) -> None:
     })
 
 
+async def _run_distiller_background(broadcast, episode_yaml: str,
+                                     episode_id: str) -> None:
+    """Run the Intent Distiller on a freshly-written episode and, on
+    success, broadcast `policy_intent_proposed` so the dashboard can
+    surface a toast / badge. Pure side-effect helper — no return value,
+    no raises (the distiller has its own try/except)."""
+    from agent.intent_distiller import distill_episode_safe
+    intent = await distill_episode_safe(episode_yaml)
+    if not intent:
+        return  # distiller logged the no-go reason
+    try:
+        await broadcast({
+            "type":      "policy_intent_proposed",
+            "timestamp": datetime.utcnow().isoformat(),
+            "data": {
+                "intent_id":      intent.get("intent_id", ""),
+                "title":          intent.get("title", ""),
+                "action_type":    (intent.get("action") or {}).get("type", ""),
+                "confidence":     intent.get("confidence", 0),
+                "source_episode": episode_id,
+                "github_url":     intent.get("github_url", ""),
+            },
+        })
+    except Exception as e:
+        print(f"[distiller] broadcast failed (non-fatal): "
+              f"{type(e).__name__}: {e}", flush=True)
+
+
 async def _play(scenario: dict, broadcast, adapter, agent) -> None:
     """Apply the fault, hand control to the agent, signal complete."""
     global _current_id
@@ -336,7 +364,7 @@ async def _play(scenario: dict, broadcast, adapter, agent) -> None:
                 for cid in impacted_ids:
                     rec = customer_intents.get_by_id(cid) or {}
                     arr_at_risk_usd += int(rec.get("arr_usd", 0) or 0)
-                await agent._execute_tool("write_episode", {
+                ep_result = await agent._execute_tool("write_episode", {
                     "scenario_id":             scenario["id"],
                     "diagnosis":               scenario.get("description", ""),
                     "outcome":                 end_outcome,
@@ -357,6 +385,25 @@ async def _play(scenario: dict, broadcast, adapter, agent) -> None:
                     "notifications_sent": ["TAC case opened with transport vendor"],
                     "actions_taken":      ["open_tac_case"],
                 })
+                # ── Fire the Intent Distiller as a fire-and-forget
+                # background task. Non-critical learning loop — failure
+                # MUST NOT propagate or delay the demo's scenario_complete
+                # signal. distill_episode_safe() never raises by contract.
+                try:
+                    import json as _json
+                    ep_data = _json.loads(ep_result) if isinstance(ep_result, str) else (ep_result or {})
+                    episode_yaml = ep_data.get("content", "")
+                    if episode_yaml:
+                        from agent.intent_distiller import distill_episode_safe
+                        asyncio.create_task(
+                            _run_distiller_background(
+                                broadcast, episode_yaml,
+                                ep_data.get("episode_id", ""),
+                            )
+                        )
+                except Exception as _e:
+                    print(f"[distiller-trigger] skipped: "
+                          f"{type(_e).__name__}: {_e}", flush=True)
             except Exception as e:
                 # Non-critical learning loop. Failure must not break the
                 # demo flow or the user-facing scenario_complete signal.

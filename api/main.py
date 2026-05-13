@@ -871,9 +871,43 @@ async def approve_proposal(proposal_id: str, body: ProposalAction = ProposalActi
             ep_data = json.loads(ep_result) if isinstance(ep_result, str) else ep_result
             episode_url = ep_data.get("url", f"https://github.com/sireenmalik/orca/tree/main/skills/past/episodes/{ep_month}/")
             episode_id  = ep_data.get("episode_id", "")
+            episode_yaml = ep_data.get("content", "") or ""
         except Exception:
             episode_url = f"https://github.com/sireenmalik/orca/tree/main/skills/past/episodes/{ep_month}/"
             episode_id  = ""
+            episode_yaml = ""
+
+        # ── 4b. Fire the Intent Distiller in the background.
+        # Non-critical learning loop — never blocks the operator-facing
+        # post-deployment NOC email (step 5 below). distill_episode_safe
+        # cannot raise; the create_task wrapper guards against schedule
+        # failure. policy_intent_proposed ws event broadcast on success.
+        if episode_yaml:
+            try:
+                from agent.intent_distiller import distill_episode_safe as _distill
+                async def _bg():
+                    intent = await _distill(episode_yaml)
+                    if intent:
+                        try:
+                            await manager.broadcast({
+                                "type":      "policy_intent_proposed",
+                                "timestamp": datetime.utcnow().isoformat(),
+                                "data": {
+                                    "intent_id":      intent.get("intent_id", ""),
+                                    "title":          intent.get("title", ""),
+                                    "action_type":    (intent.get("action") or {}).get("type", ""),
+                                    "confidence":     intent.get("confidence", 0),
+                                    "source_episode": episode_id,
+                                    "github_url":     intent.get("github_url", ""),
+                                },
+                            })
+                        except Exception as _be:
+                            print(f"[distiller] broadcast failed: {_be}",
+                                  flush=True)
+                asyncio.create_task(_bg())
+            except Exception as _e:
+                print(f"[distiller-trigger] schedule failed: "
+                      f"{type(_e).__name__}: {_e}", flush=True)
 
         # ── 5. Send NOC email with PR + episode links — same Issue/Resolution
         # template the agent uses, plus a validation-tests block and the

@@ -337,6 +337,11 @@ learned_constraint: "{inputs.get('learned_constraint', '')}"
             url = data.get("content", {}).get("html_url", "")
             return {"success": True, "episode_id": ep_id,
                     "path": path, "url": url,
+                    # `content` returned on success so callers (Distiller
+                    # trigger in stream_approval / scenarios._play) can
+                    # hand the exact YAML to the Intent Distiller without
+                    # a GitHub round-trip.
+                    "content": episode,
                     "message": f"Episode {ep_id} committed to Git"}
     except Exception as e:
         return {"success": False, "error": str(e),
