@@ -3848,6 +3848,259 @@ function _v1ChurnTabLegacy({ events }) {
   );
 }
 
+// ─── POLICY LIBRARY TAB ──────────────────────────────────────────────────────
+// L5 closed-loop policy learning surface. Pending intents come from the
+// Intent Distiller (one per resolved episode); ratified intents are the
+// match index the agent short-circuits against. Approve → token-auth
+// bot commit to intents/policy/<id>.yaml on main. Reject → archive.
+function PolicyLibraryTab() {
+  const [pending,  setPending]  = useState([]);
+  const [ratified, setRatified] = useState([]);
+  const [busyId,   setBusyId]   = useState("");
+  const [toast,    setToast]    = useState("");
+  const [editing,  setEditing]  = useState({});  // id → yaml string
+
+  const refresh = async () => {
+    try {
+      const [p, r] = await Promise.all([
+        fetch("/api/policy/pending").then(x => x.json()),
+        fetch("/api/policy/ratified").then(x => x.json()),
+      ]);
+      setPending(p.pending || []);
+      setRatified(r.ratified || []);
+    } catch (e) { /* ignore */ }
+  };
+
+  useEffect(() => {
+    refresh();
+    const t = setInterval(refresh, 8000);
+    return () => clearInterval(t);
+  }, []);
+
+  const approve = async (id) => {
+    setBusyId(id);
+    try {
+      const r = await fetch(`/api/policy/approve/${id}`, { method: "POST" })
+        .then(x => x.json());
+      if (r.success) {
+        setToast(`✓ Ratified ${id} — index reloaded (${r.active_ratified_count} active)`);
+      } else {
+        setToast(`✗ Approve failed: ${r.error || "unknown"}`);
+      }
+    } catch (e) { setToast(`✗ Approve error: ${e.message}`); }
+    setBusyId("");
+    refresh();
+    setTimeout(() => setToast(""), 4500);
+  };
+
+  const reject = async (id) => {
+    const reason = window.prompt(`Reject ${id}? Reason (optional):`, "") || "";
+    setBusyId(id);
+    try {
+      const r = await fetch(`/api/policy/reject/${id}`, {
+        method:  "POST",
+        headers: { "Content-Type": "application/json" },
+        body:    JSON.stringify({ reason }),
+      }).then(x => x.json());
+      setToast(r.success ? `✓ Archived ${id}` : `✗ Reject failed: ${r.error || "unknown"}`);
+    } catch (e) { setToast(`✗ Reject error: ${e.message}`); }
+    setBusyId("");
+    refresh();
+    setTimeout(() => setToast(""), 4500);
+  };
+
+  const beginEdit = (intent) => {
+    const yamlText = intent.yaml || JSON.stringify(intent, null, 2);
+    setEditing({ ...editing, [intent.intent_id]: yamlText });
+  };
+  const cancelEdit = (id) => {
+    const next = { ...editing }; delete next[id]; setEditing(next);
+  };
+  const saveEdit = async (id) => {
+    const body = editing[id] || "";
+    setBusyId(id);
+    try {
+      const r = await fetch(`/api/policy/edit/${id}`, {
+        method:  "POST",
+        headers: { "Content-Type": "application/json" },
+        body:    JSON.stringify({ yaml: body }),
+      }).then(x => x.json());
+      if (r.success) {
+        setToast(`✓ Edits saved for ${id} — still pending approval`);
+        cancelEdit(id);
+      } else {
+        setToast(`✗ Edit failed: ${r.error || "unknown"}`);
+      }
+    } catch (e) { setToast(`✗ Edit error: ${e.message}`); }
+    setBusyId("");
+    refresh();
+    setTimeout(() => setToast(""), 4500);
+  };
+
+  const renderCard = (intent, mode) => {
+    const id = intent.intent_id;
+    const action = intent.action || {};
+    const isEditing = editing[id] !== undefined;
+    const accent = mode === "pending" ? "#f59e0b" : "#10b981";
+    const accentBg = mode === "pending" ? "rgba(245,158,11,0.06)" : "rgba(16,185,129,0.06)";
+    return (
+      <div key={id} style={{ background: C.panel, border: `1px solid ${C.border}`,
+        borderLeft: `3px solid ${accent}`, borderRadius: 8, padding: "12px 14px",
+        marginBottom: 10, fontFamily: "monospace" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between",
+          marginBottom: 6, gap: 8 }}>
+          <span style={{ fontSize: 9, fontWeight: 700, color: accent, fontFamily: "monospace",
+            background: accentBg, padding: "2px 6px", borderRadius: 3, letterSpacing: 1 }}>
+            {id}
+          </span>
+          <span style={{ fontSize: 9, color: C.muted }}>
+            episode {intent.source_episode || "—"} · confidence {intent.confidence ?? "?"}
+          </span>
+        </div>
+        <div style={{ fontSize: 13, fontWeight: 600, color: C.text, marginBottom: 6 }}>
+          {intent.title || "(no title)"}
+        </div>
+        {intent.rationale && (
+          <div style={{ fontSize: 11, color: C.muted, marginBottom: 8,
+            fontFamily: "system-ui, sans-serif", lineHeight: 1.45 }}>
+            {intent.rationale}
+          </div>
+        )}
+        <div style={{ display: "grid", gridTemplateColumns: "auto 1fr", gap: "2px 10px",
+          fontSize: 10, color: C.muted, marginBottom: 8 }}>
+          <span>action:</span>
+          <span style={{ color: "#06b6d4" }}>
+            {action.type || "?"}{action.target ? ` → ${action.target}` : ""}
+            {action.nokia_config_change ? " · 🔧 Nokia config change" : ""}
+          </span>
+          <span>match:</span>
+          <span>{Object.entries(intent.match || {}).map(([k, v]) =>
+            `${k} ${v}`).join("  ·  ") || "—"}</span>
+          {intent.scope && (
+            <>
+              <span>scope:</span>
+              <span>{[
+                (intent.scope.domains_involved || []).join(","),
+                (intent.scope.customer_segments || []).join(","),
+                (intent.scope.slice_types || []).join(","),
+              ].filter(Boolean).join(" / ")}</span>
+            </>
+          )}
+        </div>
+        {isEditing && (
+          <textarea
+            value={editing[id]}
+            onChange={e => setEditing({ ...editing, [id]: e.target.value })}
+            style={{ width: "100%", height: 220, fontFamily: "monospace",
+              fontSize: 11, background: "#0d1117", color: C.text,
+              border: `1px solid ${C.border}`, borderRadius: 4, padding: 8,
+              marginBottom: 8, resize: "vertical" }}
+          />
+        )}
+        {mode === "pending" && (
+          <div style={{ display: "flex", gap: 6 }}>
+            {!isEditing && (
+              <>
+                <button disabled={busyId === id}
+                  onClick={() => approve(id)}
+                  style={{ background: "#10b981", color: "#fff", border: "none",
+                    borderRadius: 4, padding: "5px 14px", fontSize: 11, fontWeight: 600,
+                    cursor: "pointer", fontFamily: "monospace" }}>
+                  Approve
+                </button>
+                <button disabled={busyId === id}
+                  onClick={() => beginEdit(intent)}
+                  style={{ background: "rgba(255,255,255,0.06)", color: C.muted,
+                    border: `1px solid ${C.border}`, borderRadius: 4,
+                    padding: "5px 12px", fontSize: 11, cursor: "pointer",
+                    fontFamily: "monospace" }}>
+                  Edit
+                </button>
+                <button disabled={busyId === id}
+                  onClick={() => reject(id)}
+                  style={{ background: "rgba(239,68,68,0.10)", color: "#ef4444",
+                    border: "1px solid rgba(239,68,68,0.30)", borderRadius: 4,
+                    padding: "5px 12px", fontSize: 11, cursor: "pointer",
+                    fontFamily: "monospace" }}>
+                  Reject
+                </button>
+              </>
+            )}
+            {isEditing && (
+              <>
+                <button onClick={() => saveEdit(id)} disabled={busyId === id}
+                  style={{ background: "#06b6d4", color: "#fff", border: "none",
+                    borderRadius: 4, padding: "5px 14px", fontSize: 11,
+                    fontWeight: 600, cursor: "pointer", fontFamily: "monospace" }}>
+                  Save edits
+                </button>
+                <button onClick={() => cancelEdit(id)}
+                  style={{ background: "transparent", color: C.muted,
+                    border: `1px solid ${C.border}`, borderRadius: 4,
+                    padding: "5px 12px", fontSize: 11, cursor: "pointer",
+                    fontFamily: "monospace" }}>
+                  Cancel
+                </button>
+              </>
+            )}
+          </div>
+        )}
+        {mode === "ratified" && intent.github_url && (
+          <a href={intent.github_url} target="_blank" rel="noreferrer"
+             style={{ fontSize: 10, color: "#06b6d4", textDecoration: "none" }}>
+            view in GitHub →
+          </a>
+        )}
+      </div>
+    );
+  };
+
+  return (
+    <div style={{ height: "100%", overflow: "auto", padding: 14 }}>
+      {toast && (
+        <div style={{ position: "fixed", top: 18, right: 18, zIndex: 50,
+          background: "#0d1117", color: C.text, border: `1px solid ${C.border}`,
+          borderRadius: 6, padding: "10px 14px", fontSize: 12,
+          fontFamily: "monospace", boxShadow: "0 4px 18px rgba(0,0,0,0.4)" }}>
+          {toast}
+        </div>
+      )}
+      <div style={{ marginBottom: 18 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
+          <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: 1.5,
+            textTransform: "uppercase", color: "#f59e0b" }}>
+            Pending Ratification ({pending.length})
+          </span>
+          <span style={{ fontSize: 10, color: C.muted }}>
+            from the Intent Distiller — operator review required
+          </span>
+        </div>
+        {pending.length === 0
+          ? <div style={{ color: C.muted, fontSize: 11, padding: "12px 0" }}>
+              No pending intents. Run an Act and the Distiller will propose one.
+            </div>
+          : pending.map(p => renderCard(p, "pending"))}
+      </div>
+      <div>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
+          <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: 1.5,
+            textTransform: "uppercase", color: "#10b981" }}>
+            Ratified Policies ({ratified.length})
+          </span>
+          <span style={{ fontSize: 10, color: C.muted }}>
+            active in match index — next matching fault short-circuits the LLM
+          </span>
+        </div>
+        {ratified.length === 0
+          ? <div style={{ color: C.muted, fontSize: 11, padding: "12px 0" }}>
+              No ratified policies yet. Approve a pending intent above.
+            </div>
+          : ratified.map(p => renderCard(p, "ratified"))}
+      </div>
+    </div>
+  );
+}
+
 // ─── TABS ─────────────────────────────────────────────────────────────────────
 // Security tab hidden from the nav for v2 PM demo — the pitch drops
 // Act 3, and a visible unused tab raises "what's that?" mid-flow. The
@@ -3858,6 +4111,7 @@ const TABS = [
   { key: "ops",       label: "Operations",      icon: "◉" },
   { key: "contracts", label: "Contract Stack",  icon: "◧" },
   { key: "churn",     label: "Churn Forecast",  icon: "◎" },
+  { key: "policy",    label: "Policy Library",  icon: "◐" },
 ];
 const HIDDEN_TABS = {
   security: { label: "Security", icon: "◈" },
@@ -3885,11 +4139,40 @@ export default function App() {
   const [logModalOpen, setLogModalOpen] = useState(false);
   const [emailModal, setEmailModal] = useState(null);
   const [configModal, setConfigModal] = useState(null);
+  // Policy Library badge + global toast on Distiller proposals
+  const [policyPendingCount, setPolicyPendingCount] = useState(0);
+  const [policyToast, setPolicyToast] = useState(null);
   const wsRef = useRef(null);
+
+  // Initial / periodic count of pending policy intents (header badge).
+  useEffect(() => {
+    const fetchCount = () => fetch("/api/policy/pending")
+      .then(r => r.json())
+      .then(d => setPolicyPendingCount((d.pending || []).length))
+      .catch(() => {});
+    fetchCount();
+    const t = setInterval(fetchCount, 10000);
+    return () => clearInterval(t);
+  }, []);
 
   const addEvent = useCallback((event) => {
     setEvents(prev => [...prev.slice(-500), event]);
     if (event.type === "state_update") setState(event.data);
+    if (event.type === "policy_intent_proposed") {
+      const d = event.data || {};
+      setPolicyPendingCount(n => n + 1);
+      setPolicyToast({
+        title: d.title || "New policy intent proposed",
+        intent_id: d.intent_id || "",
+        source_episode: d.source_episode || "",
+        action_type: d.action_type || "",
+        confidence: d.confidence ?? "",
+      });
+      setTimeout(() => setPolicyToast(null), 8000);
+    }
+    if (event.type === "policy_intent_ratified") {
+      setPolicyPendingCount(n => Math.max(0, n - 1));
+    }
   }, []);
 
   // WebSocket
@@ -3963,6 +4246,32 @@ export default function App() {
   return (
     <div style={{ height: "100vh", background: C.bg, color: C.text, fontFamily: "'DM Sans','Segoe UI',system-ui,sans-serif", display: "flex", flexDirection: "column", overflow: "hidden" }}>
       <GlobalStyles />
+      {/* Global toast for Intent Distiller proposals — clickable to jump to Policy Library tab */}
+      {policyToast && (
+        <div onClick={() => { setActiveTab("policy"); setPolicyToast(null); }}
+          style={{ position: "fixed", top: 60, right: 18, zIndex: 60,
+            background: "#0d1117", border: "1px solid rgba(245,158,11,0.5)",
+            borderLeft: "3px solid #f59e0b", borderRadius: 6,
+            padding: "12px 16px", minWidth: 320, maxWidth: 420, cursor: "pointer",
+            fontFamily: "monospace", boxShadow: "0 6px 20px rgba(0,0,0,0.5)" }}>
+          <div style={{ fontSize: 9, fontWeight: 700, color: "#f59e0b",
+            letterSpacing: 1.5, marginBottom: 4 }}>
+            ◐ NEW POLICY INTENT PROPOSED
+          </div>
+          <div style={{ fontSize: 12, color: C.text, fontWeight: 600,
+            fontFamily: "system-ui,sans-serif", marginBottom: 4 }}>
+            {policyToast.title}
+          </div>
+          <div style={{ fontSize: 10, color: C.muted }}>
+            {policyToast.intent_id} · {policyToast.action_type}
+            {policyToast.confidence !== "" ? ` · conf ${policyToast.confidence}` : ""}
+            {policyToast.source_episode ? ` · ep ${policyToast.source_episode}` : ""}
+          </div>
+          <div style={{ fontSize: 9, color: "#06b6d4", marginTop: 6 }}>
+            click to review →
+          </div>
+        </div>
+      )}
       {/* HEADER */}
       <div style={{ padding: "10px 20px", borderBottom: `1px solid ${C.border}`, display: "flex", alignItems: "center", gap: 16, flexShrink: 0 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10, marginRight: 8 }}>
@@ -3976,6 +4285,13 @@ export default function App() {
           {TABS.map(tab => (
             <button key={tab.key} onClick={() => setActiveTab(tab.key)} style={{ padding: "7px 16px", borderRadius: 6, border: "none", background: activeTab === tab.key ? "rgba(6,182,212,0.12)" : "transparent", color: activeTab === tab.key ? C.blue : C.muted, fontSize: FS.tabNav, fontWeight: 700, cursor: "pointer", transition: "all 0.15s", display: "flex", alignItems: "center", gap: 6 }}>
               <span style={{ fontSize: FS.body }}>{tab.icon}</span>{tab.label}
+              {tab.key === "policy" && policyPendingCount > 0 && (
+                <span style={{ background: "#ef4444", color: "#fff",
+                  fontSize: 9, fontWeight: 800, padding: "1px 6px",
+                  borderRadius: 8, fontFamily: "monospace" }}>
+                  {policyPendingCount}
+                </span>
+              )}
             </button>
           ))}
         </div>
@@ -4011,6 +4327,7 @@ export default function App() {
         {activeTab === "contracts" && <ContractStackTab />}
         {activeTab === "security" && <SecurityTab events={events} />}
         {activeTab === "churn" && <ChurnTab events={events} />}
+        {activeTab === "policy" && <PolicyLibraryTab />}
       </div>
     </div>
   );

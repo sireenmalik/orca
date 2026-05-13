@@ -18,6 +18,8 @@ from agent import churn_state
 from agent import v2_emails
 from agent import customer_intents
 from agent import churn_correlator
+from agent import intent_distiller
+from agent import policy_index
 
 adapter = ContainerlabAdapter()
 agent = ORCAAgent(adapter=adapter)
@@ -47,6 +49,14 @@ agent.on_event(on_agent_event)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Load any ratified policy intents into the PolicyIndex on startup
+    # so match_policy_intent works the moment the container is healthy.
+    # No-op on first-ever deploy (intents/policy/ doesn't exist yet).
+    try:
+        policy_index.reload()
+    except Exception as _e:
+        print(f"[startup] policy_index.reload() failed: "
+              f"{type(_e).__name__}: {_e}", flush=True)
     yield
 
 app = FastAPI(title="ORCA API", lifespan=lifespan)
@@ -1041,6 +1051,335 @@ async def delete_proposals(): clear_proposals(); return {"status": "cleared"}
 @app.post("/api/config-proposals/{proposal_id}/pending")
 async def reopen_proposal(proposal_id: str):
     return update_proposal_status(proposal_id, "pending")
+
+# ── Policy Library ────────────────────────────────────────────────────────────
+# Closed-loop policy learning surface. Pending intents are produced by
+# the Intent Distiller after each resolution; the operator ratifies
+# (Approve), edits (Edit), or discards (Reject) them in the Policy
+# Library tab. Approve moves the pending YAML to intents/policy/<id>.yaml
+# on main (token-auth bot commit, no GPG signing per project rule); the
+# in-memory PolicyIndex reloads, and the next matching fault short-
+# circuits the LLM reasoning loop (L5 closed loop).
+
+class PolicyEdit(BaseModel):
+    yaml: str = ""
+
+class PolicyReject(BaseModel):
+    reason: str = ""
+
+
+def _gh_get_pending_listing() -> list:
+    """List filenames in intents/policy/pending/ on main via GitHub API."""
+    token      = os.getenv("GITHUB_TOKEN", "")
+    repo_owner = os.getenv("GITHUB_OWNER", "sireenmalik")
+    repo_name  = os.getenv("GITHUB_REPO",  "orca")
+    url = (f"https://api.github.com/repos/{repo_owner}/{repo_name}"
+           f"/contents/intents/policy/pending?ref=main")
+    import urllib.request as _ur, urllib.error as _ue
+    req = _ur.Request(url, headers={
+        "Accept": "application/vnd.github.v3+json",
+        **({"Authorization": f"token {token}"} if token else {}),
+    })
+    try:
+        with _ur.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read())
+            return data if isinstance(data, list) else []
+    except _ue.HTTPError as e:
+        if e.code == 404:
+            return []
+        return []
+    except Exception:
+        return []
+
+
+def _gh_get_raw(path: str) -> str:
+    """Fetch file content from GitHub on main. Returns text or empty string."""
+    token      = os.getenv("GITHUB_TOKEN", "")
+    repo_owner = os.getenv("GITHUB_OWNER", "sireenmalik")
+    repo_name  = os.getenv("GITHUB_REPO",  "orca")
+    url = (f"https://api.github.com/repos/{repo_owner}/{repo_name}"
+           f"/contents/{path}?ref=main")
+    import urllib.request as _ur
+    req = _ur.Request(url, headers={
+        "Accept": "application/vnd.github.raw",
+        **({"Authorization": f"token {token}"} if token else {}),
+    })
+    try:
+        with _ur.urlopen(req, timeout=10) as resp:
+            return resp.read().decode("utf-8")
+    except Exception:
+        return ""
+
+
+def _gh_get_sha(path: str) -> str:
+    """File SHA on main (needed for PUT/DELETE update calls)."""
+    token      = os.getenv("GITHUB_TOKEN", "")
+    repo_owner = os.getenv("GITHUB_OWNER", "sireenmalik")
+    repo_name  = os.getenv("GITHUB_REPO",  "orca")
+    url = (f"https://api.github.com/repos/{repo_owner}/{repo_name}"
+           f"/contents/{path}?ref=main")
+    import urllib.request as _ur
+    req = _ur.Request(url, headers={
+        "Accept": "application/vnd.github.v3+json",
+        **({"Authorization": f"token {token}"} if token else {}),
+    })
+    try:
+        with _ur.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read())
+            return data.get("sha", "") if isinstance(data, dict) else ""
+    except Exception:
+        return ""
+
+
+def _gh_put_file(path: str, content: str, message: str) -> bool:
+    """PUT file to main with token-auth (create or update)."""
+    import urllib.request as _ur, base64 as _b64
+    token      = os.getenv("GITHUB_TOKEN", "")
+    repo_owner = os.getenv("GITHUB_OWNER", "sireenmalik")
+    repo_name  = os.getenv("GITHUB_REPO",  "orca")
+    if not token:
+        return False
+    url = (f"https://api.github.com/repos/{repo_owner}/{repo_name}"
+           f"/contents/{path}")
+    payload = {"message": message,
+               "content": _b64.b64encode(content.encode("utf-8")).decode("ascii"),
+               "branch":  "main"}
+    sha = _gh_get_sha(path)
+    if sha:
+        payload["sha"] = sha
+    req = _ur.Request(url, data=json.dumps(payload).encode("utf-8"),
+                      method="PUT", headers={
+                          "Authorization": f"token {token}",
+                          "Accept":        "application/vnd.github.v3+json",
+                          "Content-Type":  "application/json",
+                      })
+    try:
+        with _ur.urlopen(req, timeout=15) as resp:
+            data = json.loads(resp.read())
+            return bool(data.get("content"))
+    except Exception as e:
+        print(f"[policy-api] put {path} failed: {type(e).__name__}: {e}",
+              flush=True)
+        return False
+
+
+def _gh_delete_file(path: str, message: str) -> bool:
+    """DELETE file from main (the file's sha is required by GitHub API)."""
+    import urllib.request as _ur
+    token      = os.getenv("GITHUB_TOKEN", "")
+    repo_owner = os.getenv("GITHUB_OWNER", "sireenmalik")
+    repo_name  = os.getenv("GITHUB_REPO",  "orca")
+    if not token:
+        return False
+    sha = _gh_get_sha(path)
+    if not sha:
+        return False
+    url = (f"https://api.github.com/repos/{repo_owner}/{repo_name}"
+           f"/contents/{path}")
+    payload = {"message": message, "sha": sha, "branch": "main"}
+    req = _ur.Request(url, data=json.dumps(payload).encode("utf-8"),
+                      method="DELETE", headers={
+                          "Authorization": f"token {token}",
+                          "Accept":        "application/vnd.github.v3+json",
+                          "Content-Type":  "application/json",
+                      })
+    try:
+        with _ur.urlopen(req, timeout=15) as resp:
+            return resp.status in (200, 204)
+    except Exception as e:
+        print(f"[policy-api] delete {path} failed: {type(e).__name__}: {e}",
+              flush=True)
+        return False
+
+
+def _parse_intent_yaml(text: str) -> dict:
+    try:
+        import yaml as _yaml
+        doc = _yaml.safe_load(text or "")
+        return doc if isinstance(doc, dict) else {}
+    except Exception:
+        return {}
+
+
+@app.get("/api/policy/pending")
+async def list_pending_policy():
+    """Pending policy intents — in-memory list (Distiller writes here on
+    success) AND the durable GitHub copy at intents/policy/pending/. The
+    two are kept in lockstep but the API returns the GitHub-side state
+    so a container restart doesn't drop pending items the operator
+    hasn't acted on yet."""
+    out = []
+    seen_ids = set()
+
+    # GitHub-side (durable record)
+    for entry in _gh_get_pending_listing():
+        if entry.get("type") != "file":
+            continue
+        name = entry.get("name", "")
+        if not name.endswith(".yaml"):
+            continue
+        body = _gh_get_raw(entry["path"])
+        doc  = _parse_intent_yaml(body)
+        if doc.get("intent_id"):
+            doc["github_url"] = entry.get("html_url", "")
+            doc["yaml"]       = body
+            out.append(doc)
+            seen_ids.add(doc["intent_id"])
+
+    # Distiller's in-memory list (fresh proposals that may not yet have
+    # round-tripped through GitHub on a slow connection)
+    for doc in intent_distiller.get_pending_intents():
+        if doc.get("intent_id") and doc["intent_id"] not in seen_ids:
+            out.append(doc)
+    out.sort(key=lambda d: d.get("proposed_at", ""), reverse=True)
+    return {"pending": out}
+
+
+@app.get("/api/policy/ratified")
+async def list_ratified_policy():
+    """Ratified policy intents currently active in the match index.
+    Source of truth is intents/policy/ on main; the cache is refreshed
+    on each call so freshly approved intents appear immediately."""
+    policy_index.reload()
+    out = []
+    for doc in policy_index.get_ratified_intents():
+        repo_owner = os.getenv("GITHUB_OWNER", "sireenmalik")
+        repo_name  = os.getenv("GITHUB_REPO",  "orca")
+        intent_id  = doc.get("intent_id", "")
+        doc = dict(doc)
+        doc["github_url"] = (
+            f"https://github.com/{repo_owner}/{repo_name}/blob/main/"
+            f"intents/policy/{intent_id}.yaml"
+        )
+        out.append(doc)
+    out.sort(key=lambda d: d.get("ratified_at", d.get("proposed_at", "")),
+             reverse=True)
+    return {"ratified": out}
+
+
+@app.post("/api/policy/approve/{intent_id}")
+async def approve_policy(intent_id: str):
+    """Ratify a pending intent: write intents/policy/<id>.yaml on main,
+    delete intents/policy/pending/<id>.yaml, drop from in-memory pending
+    list, reload PolicyIndex. Broadcasts policy_intent_ratified so the
+    dashboard refreshes both columns of the Policy Library tab."""
+    pending_path = f"intents/policy/pending/{intent_id}.yaml"
+    ratified_path = f"intents/policy/{intent_id}.yaml"
+    body = _gh_get_raw(pending_path)
+    if not body:
+        # Fall back to in-memory copy in case GitHub fetch failed
+        pending = intent_distiller.get_pending_intents()
+        match_doc = next((p for p in pending
+                          if p.get("intent_id") == intent_id), None)
+        if not match_doc:
+            return {"success": False, "error": "intent not found"}
+        try:
+            import yaml as _yaml
+            body = _yaml.safe_dump(match_doc, sort_keys=False,
+                                   default_flow_style=False)
+        except Exception:
+            return {"success": False, "error": "yaml dump failed"}
+
+    # Stamp ratified_at + bot identity, append to body
+    try:
+        import yaml as _yaml
+        doc = _yaml.safe_load(body) or {}
+        doc["ratified_at"] = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+        doc["ratified_by"] = "orca-operator"
+        body = _yaml.safe_dump(doc, sort_keys=False,
+                               default_flow_style=False)
+    except Exception:
+        pass
+
+    if not _gh_put_file(ratified_path, body,
+                        f"policy: ratify {intent_id}"):
+        return {"success": False, "error": "ratified write failed"}
+    _gh_delete_file(pending_path,
+                    f"policy: clear pending {intent_id} (ratified)")
+    intent_distiller.pop_pending_intent(intent_id)
+    count = policy_index.reload()
+
+    repo_owner = os.getenv("GITHUB_OWNER", "sireenmalik")
+    repo_name  = os.getenv("GITHUB_REPO",  "orca")
+    gh_url = (f"https://github.com/{repo_owner}/{repo_name}/blob/main/"
+              f"{ratified_path}")
+    await manager.broadcast({
+        "type":      "policy_intent_ratified",
+        "timestamp": datetime.utcnow().isoformat(),
+        "data": {
+            "intent_id":   intent_id,
+            "github_url":  gh_url,
+            "active_count": count,
+        },
+    })
+    return {"success": True, "intent_id": intent_id,
+            "github_url": gh_url, "active_ratified_count": count}
+
+
+@app.post("/api/policy/reject/{intent_id}")
+async def reject_policy(intent_id: str, body: PolicyReject = PolicyReject()):
+    """Reject a pending intent: move pending/<id>.yaml -> archive/<id>.yaml
+    with the operator's reason appended. No PR."""
+    pending_path = f"intents/policy/pending/{intent_id}.yaml"
+    archive_path = f"intents/policy/archive/{intent_id}.yaml"
+    yaml_body = _gh_get_raw(pending_path)
+    if not yaml_body:
+        # in-memory fallback
+        pending = intent_distiller.get_pending_intents()
+        m = next((p for p in pending if p.get("intent_id") == intent_id), None)
+        if not m:
+            return {"success": False, "error": "intent not found"}
+        try:
+            import yaml as _yaml
+            yaml_body = _yaml.safe_dump(m, sort_keys=False,
+                                        default_flow_style=False)
+        except Exception:
+            return {"success": False, "error": "yaml dump failed"}
+
+    annotated = (yaml_body.rstrip()
+                 + f"\nrejected_at: \"{datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ')}\""
+                 + f"\nrejected_by: \"orca-operator\""
+                 + f"\nrejection_reason: {json.dumps(body.reason or 'no reason given')}\n")
+    if not _gh_put_file(archive_path, annotated,
+                        f"policy: archive {intent_id} (rejected)"):
+        return {"success": False, "error": "archive write failed"}
+    _gh_delete_file(pending_path, f"policy: clear pending {intent_id} (rejected)")
+    intent_distiller.pop_pending_intent(intent_id)
+    return {"success": True, "intent_id": intent_id,
+            "archive_path": archive_path}
+
+
+@app.post("/api/policy/edit/{intent_id}")
+async def edit_policy(intent_id: str, edit: PolicyEdit):
+    """Save edited YAML back to intents/policy/pending/<id>.yaml. No
+    ratification — operator still has to click Approve afterwards."""
+    if not edit.yaml.strip():
+        return {"success": False, "error": "empty yaml"}
+    try:
+        import yaml as _yaml
+        doc = _yaml.safe_load(edit.yaml)
+        if not isinstance(doc, dict) or doc.get("intent_id") != intent_id:
+            return {"success": False,
+                    "error": "yaml must parse to dict with matching intent_id"}
+    except Exception as e:
+        return {"success": False, "error": f"yaml parse failed: {e}"}
+    pending_path = f"intents/policy/pending/{intent_id}.yaml"
+    if not _gh_put_file(pending_path, edit.yaml,
+                        f"policy: operator edit {intent_id}"):
+        return {"success": False, "error": "edit write failed"}
+    # Refresh in-memory copy too
+    intent_distiller.pop_pending_intent(intent_id)
+    intent_distiller._pending_intents.append(doc)
+    return {"success": True, "intent_id": intent_id}
+
+
+@app.post("/api/policy/reload")
+async def reload_policy_index():
+    """Force re-scan of intents/policy/ on main. Useful after a manual
+    git operation outside the API."""
+    count = policy_index.reload()
+    return {"success": True, "active_ratified_count": count}
+
 
 # ── Debug ─────────────────────────────────────────────────────────────────────
 @app.get("/api/debug/env")
