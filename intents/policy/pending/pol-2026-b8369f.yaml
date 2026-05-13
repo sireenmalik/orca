@@ -1,0 +1,29 @@
+intent_id: pol-2026-b8369f
+source_episode: 20260513-084318
+proposed_by: orca-distiller
+proposed_at: '2026-05-13T08:43:19Z'
+title: Transport link congestion >90% with healthy core triggers vendor escalation
+rationale: Episode 20260513-084318 observed transport link PE-01-P-02 utilization
+  rise to 93.8% with microbursts while UPF, SMF, and AMF remained healthy, indicating
+  a fault upstream of Nokia scope. Three customers (cust-A, cust-B, cust-C) were impacted
+  with $6.22M ARR at risk. ORCA opened a single TAC case with the transport vendor
+  and made no Nokia configuration changes.
+match:
+  transport_link_util_pct: '>90'
+  upf_qer_status: healthy
+  affected_customer_count: '>=1'
+action:
+  type: vendor_escalation
+  target: transport_vendor
+  parameters:
+    vendor: transport
+  nokia_config_change: false
+confidence: 0.88
+scope:
+  customer_segments:
+  - all
+  domains_involved:
+  - transport
+  slice_types:
+  - all
+guardrail_envelope: missions-v2
