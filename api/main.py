@@ -706,6 +706,20 @@ async def approve_proposal(proposal_id: str, body: ProposalAction = ProposalActi
     learned     = proposal.get("learned_constraint",
         f"After {trigger_link} failure: prefer reroute via PE-01-PE-02-P-01-PE-04 for lsp-customer-a")
 
+    # ── Distiller-targeted resolution data ──
+    # Derived deterministically from (a) the scenario context the agent
+    # snapshotted onto the proposal at propose_config_change time, and
+    # (b) the customer YAMLs. No LLM rewording in this path.
+    impacted_ids = (proposal.get("impacted_customers")
+                    or sorted(customer_intents.get_impacted())
+                    or [])
+    arr_at_risk_usd = 0
+    for cid in impacted_ids:
+        rec = customer_intents.get_by_id(cid) or {}
+        arr_at_risk_usd += int(rec.get("arr_usd", 0) or 0)
+    diagnosis_text = proposal.get("scenario_description", "") or trigger_desc
+    scenario_id_val = proposal.get("scenario_id", "")
+
     # Fix: agent sends 'device' key, not 'node'
     routers = list({ch.get("device", ch.get("node", ch.get("router", "PE-01"))) for ch in changes}) or ["PE-01"]
     ts = datetime.utcnow().strftime("%Y%m%d-%H%M%S")
@@ -822,7 +836,16 @@ async def approve_proposal(proposal_id: str, body: ProposalAction = ProposalActi
                 "diff": diff,
                 "validation_checks": validation,
                 "validation_detail": validation_detail,
-                "outcome": "success",
+                # ── Distiller-targeted fields (deterministic) ──
+                "scenario_id":          scenario_id_val,
+                "diagnosis":            diagnosis_text,
+                "outcome":              "save_via_config_change",
+                "nokia_config_change":  True,
+                "human_involvement":    True,   # operator clicked Approve to reach this branch
+                "customers":            impacted_ids,
+                "affected_customer_count": len(impacted_ids),
+                "arr_at_risk":          arr_at_risk_usd,
+                "saved_arr":            arr_at_risk_usd,  # save resolved cleanly
                 "mission_1_satisfied": validation.get("mission_1", True),
                 "mission_2_satisfied": validation.get("mission_2", True),
                 "mission_1_detail": m1_detail,

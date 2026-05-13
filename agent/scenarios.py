@@ -124,6 +124,11 @@ SCENARIOS = {
         "short_label":       "Transport congestion (UPF innocent)",
         "description":       "PE-01↔P-02 at 93% with microbursts. UPF/SMF/AMF healthy — fault is upstream of Nokia scope.",
         "duration_seconds":  60,
+        # Resolution path: vendor handles, no Nokia config change, no
+        # operator click. Episode is emitted deterministically at end of
+        # _play (no stream_approval to pass through). Outcome value must
+        # match the Distiller's action.type enum verbatim.
+        "episode_at_end_outcome": "vendor_escalation",
         # The cross-domain demo moment: three tenants ride LSP-1 — Helix
         # Robotics (5G slice-A), Meridian Capital Markets (MPLS L3VPN),
         # Larkspur Markets (MPLS L3VPN). Same physical congestion event,
@@ -293,6 +298,15 @@ async def _play(scenario: dict, broadcast, adapter, agent) -> None:
         # agent_status) flow to the websocket bus via on_agent_event,
         # so the dashboard's reasoning log fills in real time.
         if agent is not None:
+            # Snapshot the active scenario onto the agent so handlers
+            # (propose_config_change) and the post-cycle episode emitter
+            # can read the canonical scenario.description + impacted
+            # customer list without depending on this module's globals.
+            agent._active_scenario = {
+                "id":                 scenario["id"],
+                "description":        scenario.get("description", ""),
+                "impacted_customers": list(scenario.get("impacted_customers", [])),
+            }
             try:
                 await agent.analyze(
                     context=scenario["agent_context"],
@@ -306,6 +320,52 @@ async def _play(scenario: dict, broadcast, adapter, agent) -> None:
                     "data": {
                         "subtype":     "alert",
                         "content":     f"agent.analyze() raised: {type(e).__name__}: {str(e)[:200]}",
+                        "scenario_id": scenario["id"],
+                    },
+                })
+
+        # 3b. Auto-emit a deterministic episode for resolution paths that
+        # don't pass through stream_approval (Act 2: vendor_escalation,
+        # no operator click). Act 1 is emitted later in stream_approval
+        # after the human approves. Skip if no outcome declared.
+        end_outcome = scenario.get("episode_at_end_outcome")
+        if end_outcome and agent is not None:
+            try:
+                impacted_ids = list(scenario.get("impacted_customers", []))
+                arr_at_risk_usd = 0
+                for cid in impacted_ids:
+                    rec = customer_intents.get_by_id(cid) or {}
+                    arr_at_risk_usd += int(rec.get("arr_usd", 0) or 0)
+                await agent._execute_tool("write_episode", {
+                    "scenario_id":             scenario["id"],
+                    "diagnosis":               scenario.get("description", ""),
+                    "outcome":                 end_outcome,
+                    "nokia_config_change":     False,
+                    "human_involvement":       False,
+                    "customers":               impacted_ids,
+                    "affected_customer_count": len(impacted_ids),
+                    "arr_at_risk":             arr_at_risk_usd,
+                    "saved_arr":               0,  # vendor handling — not saved yet
+                    "trigger_type":            "transport_congestion",
+                    "trigger_description":     scenario.get("description", ""),
+                    "reasoning_summary":       (
+                        f"ORCA diagnosed transport-side fault on shared LSP. "
+                        f"Nokia core innocent ({len(impacted_ids)} customers "
+                        f"impacted via shared underlay). Escalated to vendor "
+                        f"via single TAC case; no Nokia config change."
+                    ),
+                    "notifications_sent": ["TAC case opened with transport vendor"],
+                    "actions_taken":      ["open_tac_case"],
+                })
+            except Exception as e:
+                # Non-critical learning loop. Failure must not break the
+                # demo flow or the user-facing scenario_complete signal.
+                await broadcast({
+                    "type":      "scenario_log",
+                    "timestamp": datetime.utcnow().isoformat(),
+                    "data": {
+                        "subtype":     "info",
+                        "content":     f"episode emit skipped: {type(e).__name__}: {str(e)[:160]}",
                         "scenario_id": scenario["id"],
                     },
                 })
