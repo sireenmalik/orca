@@ -1,0 +1,11 @@
+# ORCA Config Proposal — PE-01
+# Generated: 2026-05-22T15:54:51.255816Z
+# Incident: An info-level alarm on UPF-01 indicates that slice-A p99 N3 latency trend slope projects an SLA breach within ~10 minutes. Current p99 is 13.0 ms (SLA 15 ms). Investigation shows QER drift on UPF-01 for slice-A: intent GBR is 50 Mbps but enforced is only 32 Mbps. Restoring the enforced GBR to the intent value should alleviate the latency trend and prevent SLA breach.
+# Branch: cfg/PE-01-20260522-155450
+
+configure router isis 0
+    interface "unknown"
+-       metric ?
++       metric ?
+    exit
+exit
