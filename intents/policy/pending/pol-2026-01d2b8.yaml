@@ -1,0 +1,34 @@
+intent_id: pol-2026-01d2b8
+source_episode: 20260616-174418
+proposed_by: orca-distiller
+proposed_at: '2026-06-16T17:44:18Z'
+title: Link utilization >90% with slice throughput loss triggers IGP metric up
+rationale: For customer cust-A on slice-A, transport link PE-01-P-02 utilization rose
+  to 96% while UPF-01 slice-A priority class throughput dropped to 32 Mbps enforced
+  vs 50 Mbps committed GBR, putting $2.4M ARR at risk. ORCA responded by increasing
+  the IGP metric on the congested link (PE-01-P-02 and P-02-PE-01 from 10 to 20) via
+  NETCONF, which reduced utilization to 90.8% and saved the ARR. This pattern shows
+  that persistent high link utilization coupled with slice throughput degradation
+  should be met with a permanent IGP metric increase to shift traffic and restore
+  compliance.
+match:
+  transport_link_util_pct: '>95'
+  slice_throughput_mbps: <40
+  affected_customer_count: '>=1'
+action:
+  type: adjust_igp_metric
+  target: router
+  parameters:
+    metric_increase: 10
+  nokia_config_change: true
+confidence: 0.7
+scope:
+  customer_segments:
+  - enterprise
+  domains_involved:
+  - transport
+  - core
+  - ran
+  slice_types:
+  - embb
+guardrail_envelope: missions-v2
