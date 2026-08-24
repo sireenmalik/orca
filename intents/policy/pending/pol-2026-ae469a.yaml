@@ -1,0 +1,33 @@
+intent_id: pol-2026-ae469a
+source_episode: 20260824-033547
+proposed_by: orca-distiller
+proposed_at: '2026-08-24T03:35:48Z'
+title: UPF QER drift causing slice latency SLA risk, correct via GBR config change
+rationale: In episode 20260824-033547, customer cust-A experienced slice-A p99 N3
+  latency of 13.0 ms (SLA 15 ms) with a rising trend projecting breach in ~10 min
+  due to QER drift on UPF-01 where enforced GBR was 32 Mbps vs intended 50 Mbps. ORCA
+  restored the enforced GBR to 50 Mbps via NETCONF config change, eliminating the
+  queuing latency and saving $2.4M ARR. Future incidents showing similar latency drift
+  and QER mismatch should be resolved by the same config action.
+match:
+  slice_p99_latency_us: '>12000'
+  slice_p99_rising_pct: '>0'
+  upf_qer_status: qer_drift
+  affected_customer_count: ==1
+  customer_arr_at_risk_usd: '>1000000'
+action:
+  type: save_via_config_change
+  target: UPF-01
+  parameters:
+    slice: slice-A
+    gbr_mbps: 50
+  nokia_config_change: true
+confidence: 0.7
+scope:
+  customer_segments:
+  - enterprise
+  domains_involved:
+  - core
+  slice_types:
+  - embb
+guardrail_envelope: missions-v2
