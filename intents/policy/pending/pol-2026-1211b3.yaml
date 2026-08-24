@@ -1,0 +1,32 @@
+intent_id: pol-2026-1211b3
+source_episode: 20260824-033743
+proposed_by: orca-distiller
+proposed_at: '2026-08-24T03:37:44Z'
+title: High transport link utilization with UPF QER drift triggers IGP metric increase
+rationale: For customer cust-A on slice-A, transport link PE-01-P-02 utilization rose
+  to 95.8% (>90%) while UPF QER drift caused slice-A throughput to fall to 32 Mbps
+  vs the committed 50 Mbps GBR, putting $2.4M ARR at risk. ORCA responded by increasing
+  the IGP metric on PE-01-P-02 from 10 to 20, which reduced utilization to 90.1% and
+  resolved the congestion. This pattern shows that persistent link overload combined
+  with UPF QER drift on a GBR slice can be mitigated by a permanent IGP metric adjustment.
+match:
+  transport_link_util_pct: '> 90'
+  upf_qer_status: drift
+  slice_throughput_mbps: < 40
+  affected_customer_count: '>= 1'
+action:
+  type: adjust_igp_metric
+  target: link PE-01-P-02
+  parameters:
+    metric: 20
+  nokia_config_change: true
+confidence: 0.7
+scope:
+  customer_segments:
+  - enterprise
+  domains_involved:
+  - transport
+  - core
+  slice_types:
+  - embb_premium
+guardrail_envelope: missions-v2
