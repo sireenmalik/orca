@@ -1,0 +1,31 @@
+intent_id: pol-2026-15f151
+source_episode: 20260824-033642
+proposed_by: orca-distiller
+proposed_at: '2026-08-24T03:36:43Z'
+title: Transport link over 90% utilization triggers vendor escalation
+rationale: In episode 20260824-033642, transport link PE-01-P-02 spiked to 93% utilization
+  with microbursts while UPF/SMF/AMF remained healthy, impacting three customers (cust-A,
+  cust-B, cust-C) with $6.22M ARR at risk. ORCA diagnosed the fault as upstream of
+  Nokia scope and opened a single TAC case with the transport vendor, resulting in
+  vendor_escalation without any Nokia config change. This shows that when a transport
+  link exceeds 90% utilization with core services healthy and multiple customers affected,
+  the appropriate response is to escalate to the transport vendor.
+match:
+  transport_link_util_pct: '>90'
+  affected_customer_count: '>=3'
+  customer_arr_at_risk_usd: '>5000000'
+  transport_link_status: up
+action:
+  type: vendor_escalation
+  target: transport_vendor
+  parameters: {}
+  nokia_config_change: false
+confidence: 0.88
+scope:
+  customer_segments:
+  - all
+  domains_involved:
+  - transport
+  slice_types:
+  - all
+guardrail_envelope: missions-v2
