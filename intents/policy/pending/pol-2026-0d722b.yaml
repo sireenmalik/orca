@@ -1,0 +1,33 @@
+intent_id: pol-2026-0d722b
+source_episode: 20260824-035806
+proposed_by: orca-distiller
+proposed_at: '2026-08-24T03:58:07Z'
+title: High link utilization triggers IGP metric increase to ease congestion
+rationale: For customer cust-A on slice-A, ORCA detected QER drift on UPF-01 (enforced
+  32 Mbps vs committed 50 Mbps GBR) while transport link PE-01-P-02 utilization was
+  92.1%, putting $2.4M ARR at risk. The response was to increase the IGP metric on
+  PE-01-P-02 and P-02-PE-01 from 10 to 20, shifting traffic and relieving congestion.
+  This pattern links high link utilization and UPF QER drift to an IGP metric adjustment
+  that prevents SLA breach.
+match:
+  transport_link_util_pct: '>90'
+  upf_qer_status: drift
+  affected_customer_count: '>=1'
+  customer_arr_at_risk_usd: '>0'
+action:
+  type: adjust_igp_metric
+  target: nokia
+  parameters:
+    interface: PE-01-P-02
+    new_metric: 20
+  nokia_config_change: true
+confidence: 0.6
+scope:
+  customer_segments:
+  - all
+  domains_involved:
+  - transport
+  - core
+  slice_types:
+  - all
+guardrail_envelope: missions-v2
