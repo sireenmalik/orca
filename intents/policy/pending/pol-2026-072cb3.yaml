@@ -1,0 +1,32 @@
+intent_id: pol-2026-072cb3
+source_episode: 20260824-035704
+proposed_by: orca-distiller
+proposed_at: '2026-08-24T03:57:04Z'
+title: UPF QER drift causing slice latency rise, restore GBR via config change
+rationale: For customer cust-A, slice-A p99 latency reached 13 ms (projected to breach
+  15 ms SLA) while UPF-01 QER drift left enforced GBR at 32 Mbps vs committed 50 Mbps.
+  No transport congestion observed (links <45% utilization). Restoring the GBR to
+  50 Mbps via Nokia config change resolved the latency projection and saved $2.4M
+  ARR.
+match:
+  slice_p99_latency_us: '>12000'
+  upf_qer_status: drifted
+  slice_throughput_mbps: <40
+  transport_link_util_pct: <50
+  affected_customer_count: 1
+action:
+  type: save_via_config_change
+  target: UPF-01
+  parameters:
+    slice: slice-A
+    gbr_mbps: 50
+  nokia_config_change: true
+confidence: 0.7
+scope:
+  customer_segments:
+  - enterprise
+  domains_involved:
+  - core
+  slice_types:
+  - embb
+guardrail_envelope: missions-v2
