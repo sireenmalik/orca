@@ -1,0 +1,32 @@
+intent_id: pol-2026-0e3ef4
+source_episode: 20260824-035713
+proposed_by: orca-distiller
+proposed_at: '2026-08-24T03:57:13Z'
+title: "High transport link utilization (>90%) with healthy core \u2192 vendor TAC\
+  \ escalation"
+rationale: "On 2026-08-24, customer cust-A experienced slice-a-qos-drift where transport\
+  \ link PE-01-P-02 utilization spiked to 93% with microbursts while UPF, SMF, and\
+  \ AMF remained healthy, indicating a fault upstream of Nokia's scope. ORCA diagnosed\
+  \ the issue as transport-side and opened a single TAC case with the transport vendor,\
+  \ resolving the incident without any Nokia configuration change. This pattern \u2014\
+  \ high transport link utilization (>90%) with healthy core nodes \u2014 reliably\
+  \ indicates a transport\u2011vendor\u2011responsible fault that should be escalated\
+  \ via vendor TAC."
+match:
+  transport_link_util_pct: '> 90'
+  affected_customer_count: 1
+  customer_arr_at_risk_usd: '> 2000000'
+action:
+  type: vendor_escalation
+  target: transport_vendor
+  parameters: {}
+  nokia_config_change: false
+confidence: 0.88
+scope:
+  customer_segments:
+  - all
+  domains_involved:
+  - transport
+  slice_types:
+  - all
+guardrail_envelope: missions-v2
