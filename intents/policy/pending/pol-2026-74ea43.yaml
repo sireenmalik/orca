@@ -1,0 +1,29 @@
+intent_id: pol-2026-74ea43
+source_episode: 20260824-032802
+proposed_by: orca-distiller
+proposed_at: '2026-08-24T03:28:03Z'
+title: Transport link >90% utilization with microbursts triggers vendor escalation
+rationale: "Episode 20260824-032802 showed transport link PE-01-P-02 utilization rise\
+  \ to 95.7% with microbursts while UPF/SMF/AMF remained healthy, indicating a fault\
+  \ upstream of Nokia scope. Three customers (cust-A, cust-B, cust-C) were impacted\
+  \ via shared underlay, with $6.22M ARR at risk. ORCA opened a single TAC case with\
+  \ the transport vendor and made no Nokia config change. This pattern reliably indicates\
+  \ a transport\u2011side congestion issue requiring vendor escalation."
+match:
+  transport_link_util_pct: '>90'
+  affected_customer_count: '>=3'
+  customer_arr_at_risk_usd: '>5000000'
+action:
+  type: vendor_escalation
+  target: transport_vendor
+  parameters: {}
+  nokia_config_change: false
+confidence: 0.88
+scope:
+  customer_segments:
+  - all
+  domains_involved:
+  - transport
+  slice_types:
+  - all
+guardrail_envelope: missions-v2
