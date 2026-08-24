@@ -1,0 +1,15 @@
+# ORCA Config Proposal — PE-01
+# Generated: 2026-08-24T04:12:21.655222Z
+# Incident: Link PE-01-P-02 utilization remains high (92.3%) after rerouting LSP-1; increasing its metric will discourage new LSPs from using it, while lowering metric on PE-01-PE-04 encourages use of alternate path.
+# Branch: cfg/PE-01-20260824-041220
+
+configure router isis 0
+    interface "unknown"
+-       metric ?
++       metric ?
+    exit
+    interface "unknown"
+-       metric ?
++       metric ?
+    exit
+exit
