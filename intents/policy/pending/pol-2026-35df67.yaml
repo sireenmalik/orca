@@ -1,0 +1,30 @@
+intent_id: pol-2026-35df67
+source_episode: 20260824-041122
+proposed_by: orca-distiller
+proposed_at: '2026-08-24T04:11:23Z'
+title: Transport link congestion >90% triggers transport vendor TAC escalation
+rationale: "In episode 20260824-041122, transport link PE-01-P-02 utilization spiked\
+  \ to 96% (93% with microbursts) while UPF/SMF/AMF remained healthy, indicating a\
+  \ fault upstream of Nokia scope. Three customers (cust-A, cust-B, cust-C) were impacted\
+  \ with $6.22M ARR at risk. ORCA opened a TAC case with the transport vendor and\
+  \ made no Nokia config change. This pattern suggests that sustained transport link\
+  \ utilization above 90% with multi\u2011customer impact should be escalated to the\
+  \ transport vendor."
+match:
+  transport_link_util_pct: '>90'
+  affected_customer_count: '>=3'
+  customer_arr_at_risk_usd: '>=5000000'
+action:
+  type: vendor_escalation
+  target: transport_vendor
+  parameters: {}
+  nokia_config_change: false
+confidence: 0.85
+scope:
+  customer_segments:
+  - all
+  domains_involved:
+  - transport
+  slice_types:
+  - all
+guardrail_envelope: missions-v2
