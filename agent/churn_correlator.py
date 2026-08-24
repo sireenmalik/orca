@@ -168,7 +168,7 @@ async def correlate(customer_id: str, agent) -> dict:
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user",   "content": user_msg},
             ],
-            extra_body={"low_effort": True},
+            extra_body={"chat_template_kwargs": {"enable_thinking": True, "low_effort": True}},
         )
     except Exception as e:
         return {

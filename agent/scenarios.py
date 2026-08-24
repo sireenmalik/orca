@@ -44,6 +44,7 @@ SCENARIOS = {
     # propose restoring the QER.
     "slice-a-qos-drift": {
         "id":                "slice-a-qos-drift",
+        "trigger_type":      "qos_drift",
         "name":              "Slice-A QoS degradation on UPF-01",
         "short_label":       "Slice-A QoS drift",
         "description":       "QER drift on UPF-01 slice-A priority class: enforced 32 Mbps vs committed 50 Mbps GBR.",
@@ -129,6 +130,7 @@ SCENARIOS = {
     # (Nokia has no action authority over transport).
     "transport-congestion-upf-innocent": {
         "id":                "transport-congestion-upf-innocent",
+        "trigger_type":      "transport_congestion",
         "name":              "Transport congestion on LSP-1, UPF-01 innocent",
         "short_label":       "Transport congestion (UPF innocent)",
         "description":       "PE-01↔P-02 at 93% with microbursts. UPF/SMF/AMF healthy — fault is upstream of Nokia scope.",
@@ -351,6 +353,22 @@ async def _play(scenario: dict, broadcast, adapter, agent) -> None:
                 pass  # don't let one bad patch kill the run
         await _broadcast_state(broadcast, adapter)
 
+        # 2a. GROUND-TRUTH SNAPSHOT — set for EVERY path (short-circuit
+        # or full diagnosis) so the episode emitter always has canonical
+        # scenario identity. Cleared in the finally block.
+        if agent is not None:
+            _impacted_gt = list(scenario.get("impacted_customers", []))
+            _arr_gt = 0
+            for _cid in _impacted_gt:
+                _rec = customer_intents.get_by_id(_cid) or {}
+                _arr_gt += int(_rec.get("arr_usd", 0) or 0)
+            agent._active_scenario = {
+                "id":                 scenario["id"],
+                "description":        scenario.get("description", ""),
+                "impacted_customers": _impacted_gt,
+                "trigger_type":       scenario.get("trigger_type", ""),
+                "arr_at_risk":        _arr_gt,
+            }
         # 2b. L5 SHORT-CIRCUIT — check the ratified PolicyIndex BEFORE
         # spinning up the LLM. If a prior episode of this fault has
         # already been distilled, ratified, and matched against this
@@ -432,11 +450,6 @@ async def _play(scenario: dict, broadcast, adapter, agent) -> None:
             # (propose_config_change) and the post-cycle episode emitter
             # can read the canonical scenario.description + impacted
             # customer list without depending on this module's globals.
-            agent._active_scenario = {
-                "id":                 scenario["id"],
-                "description":        scenario.get("description", ""),
-                "impacted_customers": list(scenario.get("impacted_customers", [])),
-            }
             try:
                 await agent.analyze(
                     context=scenario["agent_context"],
@@ -527,6 +540,8 @@ async def _play(scenario: dict, broadcast, adapter, agent) -> None:
         })
     finally:
         _current_id = None
+        if agent is not None:
+            agent._active_scenario = {}
         await _broadcast_state(broadcast, adapter)
 
 
