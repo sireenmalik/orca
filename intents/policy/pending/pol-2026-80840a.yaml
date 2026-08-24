@@ -1,0 +1,29 @@
+intent_id: pol-2026-80840a
+source_episode: 20260824-041225
+proposed_by: orca-distiller
+proposed_at: '2026-08-24T04:12:26Z'
+title: High transport link utilization triggers IGP metric adjustment
+rationale: Link PE-01-P-02 utilization remained at 92.3% after LSP reroute, putting
+  cust-A, cust-B, cust-C at risk with $6.22M ARR. ORCA increased the IGP metric on
+  the congested link and decreased it on alternate PE-01-PE-04, pushing the config
+  via NETCONF to PE-01, which reduced utilization and saved the full ARR.
+match:
+  transport_link_util_pct: '>90'
+  affected_customer_count: '>=3'
+  customer_arr_at_risk_usd: '>5000000'
+action:
+  type: adjust_igp_metric
+  target: PE-01
+  parameters:
+    increase_metric_on_congested_link: true
+    decrease_metric_on_alternate_path: true
+  nokia_config_change: true
+confidence: 0.7
+scope:
+  customer_segments:
+  - all
+  domains_involved:
+  - transport
+  slice_types:
+  - all
+guardrail_envelope: missions-v2
